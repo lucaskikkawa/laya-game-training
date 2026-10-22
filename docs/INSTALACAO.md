@@ -1,6 +1,6 @@
 # Instalação no Windows 11 (PowerShell)
 
-O jogo usa Python 3.13, CUDA na NVIDIA quando disponível e CPU como fallback.
+O jogo usa Python 3.14 (o PC do Lucas tem 3.14.5), CUDA na NVIDIA quando disponível e CPU como fallback.
 O modelo base não recebe treino nesta versão. Tenha Git, o Python Launcher (`py`)
 e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB).
 
@@ -21,7 +21,7 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    Para outra pasta ou Python (a versão precisa ser compatível com os wheels):
 
    ```powershell
-   .\scripts\instalar.ps1 -Destino D:\laya-games -Python 3.14
+   .\scripts\instalar.ps1 -Destino D:\laya-games -Python 3.13   # opcional: outra versão do Python
    ```
 
    O script espera um checkout no destino; quando o destino está vazio, pode

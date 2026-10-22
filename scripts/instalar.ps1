@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [string]$Destino = 'C:\Users\lucas\laya-games',
-    [string]$Python = '3.13'
+    [string]$Python = '3.14'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest

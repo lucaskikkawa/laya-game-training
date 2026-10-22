@@ -1,5 +1,5 @@
 # Planejamento laya-game-training (Planejamento aprovado em 22/10/2026)
-Atualizado: 22/10/2026
+Atualizado: 22/10/2026 (Python 3.14 como padrão)
 
 ## Objetivo
 O Laya joga jogos em Pygame em tempo real e aprende de verdade, não por tentativa aleatória, com conhecimento que passa de um jogo pra outro.
@@ -101,7 +101,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 ## Treino e ambiente
 - REGRA DE HARDWARE: o Pygame roda no processador e na GPU integrada (Intel UHD 630). O Laya, para jogar e treinar, roda na GTX 1650 pelo CUDA.
 - PC do Lucas: Dell G15, GTX 1650 4 GB, 32 GB de RAM, Windows 11.
-- Usar um venv com Python 3.13 e torch com CUDA 12.6.
+- Usar um venv com Python 3.14 (PC do Lucas: 3.14.5) e torch com CUDA 12.6.
 - Fine-tuning completo não cabe em 4 GB, então congelamos a maior parte do modelo.
 - Teste de CPU contra GPU.
 - Kaggle: também vamos testar o treino lá. São 2 T4, 29 GB de RAM, sessões de até 12 h e 30 h de GPU por semana. Precisa verificar o telefone, o que é quase certo, mas não achei a regra oficial.
@@ -141,7 +141,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 - laya 0.4.13. O PC do Lucas tem a 0.3.28 e vai atualizar no venv. Repositório: NandhaKishorM/laya, modelos em huggingface.co/convaiinnovations.
 - Checkpoint `convaiinnovations/laya`: 421M parâmetros, ModernBERT-large, 512 tokens.
 - Alternativa `laya-multilingual`: 322M parâmetros, 1024 tokens, até 8192.
-- torch 2.14.1+cu126, transformers 5.20.2 (fixar), pygame-ce 2.5.8, numpy 2.5.4. Todos rodam no Windows com Python 3.13.
+- torch 2.14.1+cu126, transformers 5.20.2 (fixar), pygame-ce 2.5.8, numpy 2.5.4. Todos rodam no Windows com Python 3.14 (torch tem wheel cp314 win_amd64 no índice cu126).
 - Placa de vídeo, por estimativa: dois Laya em fp16 no mesmo programa ocupam uns 2,0 a 2,4 GB e cabem na GTX 1650. A medição de verdade fica pra v0.1.
 - Treino no PC: só congelando a maior parte do modelo (LoRA ou só a parte final). O treino completo precisa de mais de 6,7 GB.
 
