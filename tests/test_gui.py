@@ -81,3 +81,33 @@ def test_normal_120_frames_redimensiona_e_alterna_painel(tmp_path, monkeypatch):
     assert app.jogo.passos >= 1 and not app.erro
     assert tamanhos[-1] == (960, 640)
     assert not app.painel
+
+
+def test_cli_e_menu_excluem_nivel_adiado(tmp_path):
+    import pytest
+    with pytest.raises(SystemExit):
+        argumentos(['--nivel', '30'])
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        niveis = []
+        for _ in range(4):
+            niveis.append(app.nivel)
+            app.acionar('nivel')
+        assert niveis == [15, 20, 25, 15]
+    finally:
+        app.fechar()
+
+
+def test_resultado_avisa_exclusao_do_treino(tmp_path):
+    from types import SimpleNamespace
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        app.sessao = SimpleNamespace(
+            documento={'valida_para_treino': False}, resultados=[], registros=[],
+            indice=1, concluida=True, pasta=tmp_path, decisor=MockLaya())
+        textos = []
+        app.texto = lambda texto, *args, **kwargs: textos.append(texto)
+        app.desenhar_resultado()
+        assert any('Sessão excluída do treino' in t for t in textos)
+    finally:
+        app.fechar()

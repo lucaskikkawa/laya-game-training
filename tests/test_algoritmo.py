@@ -4,6 +4,32 @@ from jogos.snake.regras import Jogo, ACOES, NIVEIS, lista_comidas
 from scripts.qa_algoritmo import partida
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("indice", (62, 128), ids=("partida-62-corpo", "partida-128-lista"))
+def test_derrotas_25x25_vencem_com_listas_originais(indice, monkeypatch):
+    import json
+    from pathlib import Path
+    from jogos.snake import regras
+
+    casos = json.loads((Path(__file__).parent / "fixtures" / "derrotas_25x25.json")
+                       .read_text(encoding="utf-8"))
+    caso = next(c for c in casos if c["partida"] == indice)
+    comidas = caso["comidas"]
+    original = [p[:] for p in comidas]
+
+    def sorteio_proibido(*args, **kwargs):
+        pytest.fail("Regressão deve usar exclusivamente a lista original")
+
+    monkeypatch.setattr(regras, "lista_comidas", sorteio_proibido)
+    g = partida(caso["nivel"], comidas)
+    assert g.vitoria and g.fim and g.morte is None, g.resumo()
+    assert len(g.corpo) == g.nivel.meta
+    assert g.comidas_consumidas == g.nivel.meta - 3
+    assert comidas == original
+    assert g.comidas == [tuple(p) for p in original]
+    assert g.indice_comida <= len(original)
+
+
 def test_menor_caminho_seguro():
     g = Jogo(15, [(10, 7), (0, 0)])
     algoritmo = Algoritmo()
@@ -51,3 +77,114 @@ def test_mil_partidas_por_nivel(nivel, request, tmp_path):
         arquivo = tmp_path / f"falhas_{nivel}.json"
         arquivo.write_text(json.dumps(falhas), encoding="utf-8")
     assert not falhas, f"{len(falhas)}/{quantidade} derrotas no nível {nivel}; reprodução em {arquivo}"
+
+
+def test_rota_preserva_espaco_livre_ao_sair_da_borda():
+    # Regressão: a rota direta comia, mas deixava um beco junto à borda.
+    g = Jogo(20, [(6, 19), (0, 0)])
+    g.corpo = ([(x, 0) for x in range(17, 6, -1)]
+               + [(7, y) for y in range(1, 7)]
+               + [(6, y) for y in range(6, 17)] + [(5, 16), (4, 16)])
+    g.direcao = 1
+    algoritmo = Algoritmo()
+    while g.comidas_consumidas == 0 and not g.fim:
+        g.passo(algoritmo.escolher(g))
+    assert not g.fim and g.comidas_consumidas == 1
+    assert g.passos <= g.nivel.limite
+    livres = {(x, y) for y in range(20) for x in range(20)} - set(g.corpo)
+    from jogos.snake.regras import adjacentes, caminho_bfs
+    assert all(sum(q in livres for q in adjacentes(p, 20)) >= 2 for p in livres)
+    assert all(caminho_bfs(next(iter(livres)), p, g.corpo, 20) is not None for p in livres)
+
+
+def test_qa_preserva_erro_de_lista_como_falha(monkeypatch):
+    from scripts import qa_algoritmo
+    comidas = [(8, 7), (8, 7)]
+    monkeypatch.setattr(qa_algoritmo, "lista_comidas", lambda n: comidas)
+    # Ao comer a primeira, a única candidata restante está ocupada.
+    monkeypatch.setattr(Algoritmo, "escolher", lambda self, jogo: "straight")
+    nivel, falha = qa_algoritmo.diagnosticar((15, 9))
+    assert nivel == 15 and falha["partida"] == 9
+    assert "esgotada" in falha["erro"]
+    assert falha["comidas"] == comidas
+    assert falha["pulos"] == [
+        {"indice": 1, "posicao": (8, 7), "motivo": "ocupada", "passo": 1}]
+
+
+def test_gargalo_detectado_mesmo_sem_becos():
+    from jogos.snake.regras import adjacentes
+    algoritmo = Algoritmo()
+    algoritmo.configurar(15)
+    # Duas salas 2x2 ligadas por uma casa: nenhum beco, mas ocupar a ponte
+    # separa as salas e pode prender a cabeça durante o crescimento.
+    livres = {(0, 0), (1, 0), (0, 1), (1, 1), (2, 0),
+              (3, 0), (4, 0), (3, 1), (4, 1)}
+    assert all(sum(q in livres for q in adjacentes(p, 15)) >= 2 for p in livres)
+    mascara = sum(algoritmo._bits[p] for p in livres)
+    assert algoritmo.gargalos(mascara) == 3
+    assert algoritmo.gargalos(sum(algoritmo._bits[p] for p in livres if p[0] < 2)) == 0
+
+
+def test_busca_nao_substitui_rota_melhor_por_rota_que_isola_regiao():
+    import json
+    from pathlib import Path
+    from jogos.snake.regras import caminho_bfs
+    # Estado reproduzido de uma derrota no QA de 200 partidas do nível 25.
+    estado = json.loads((Path(__file__).parent / "fixtures" / "rota_25.json").read_text())
+    g = Jogo(25, [estado["comida"], (0, 0)])
+    g.corpo = [tuple(p) for p in estado["corpo"]]
+    g.direcao = estado["direcao"]
+    g.sem_comer = estado["sem_comer"]
+    algoritmo = Algoritmo()
+    algoritmo.configurar(25)
+    rota = algoritmo.planejar(g)
+    futuro = simular(g.corpo, rota, g.comida)
+    assert futuro is not None and futuro[0] == g.comida
+    assert len(rota) <= g.nivel.limite - g.sem_comer
+    livres = set(algoritmo._bits) - set(futuro)
+    assert all(caminho_bfs(next(iter(livres)), p, futuro, 25) is not None for p in livres)
+
+
+def test_busca_corpo_atravessa_liberacao_tardia_dentro_do_prazo():
+    import json
+    from pathlib import Path
+    estado = json.loads((Path(__file__).parent / "fixtures" / "liberacao_25.json").read_text())
+    g = Jogo(25, [estado["comida"], (0, 0)])
+    g.corpo = [tuple(p) for p in estado["corpo"]]
+    g.direcao = estado["direcao"]
+    g.sem_comer = estado["sem_comer"]
+    algoritmo = Algoritmo()
+    algoritmo.configurar(25)
+    rota = algoritmo.busca_corpo(g)
+    assert rota and len(rota) <= g.nivel.limite - g.sem_comer
+    futuro = simular(g.corpo, rota, g.comida)
+    assert futuro is not None and futuro[0] == g.comida
+
+
+@pytest.mark.parametrize("nivel", NIVEIS)
+def test_concavidade_incremental_equivale_ao_calculo_completo(nivel):
+    from jogos.snake.regras import adjacentes
+    algoritmo = Algoritmo()
+    algoritmo.configurar(nivel)
+    serpentina = [(x, y) for y in range(nivel)
+                  for x in (range(nivel) if y % 2 == 0 else range(nivel - 1, -1, -1))]
+    for tamanho in (3, NIVEIS[nivel].meta // 2, NIVEIS[nivel].meta - 1):
+        corpo = serpentina[nivel + 3:nivel + 3 + tamanho]
+        antes = sum(algoritmo._bits[p] for p in corpo)
+        for p in adjacentes(corpo[0], nivel):
+            depois = (antes & ~algoritmo._bits[corpo[-1]]) | algoritmo._bits[p]
+            valor = algoritmo.concavidade_apos_passo(
+                antes, depois, corpo[-1], p, algoritmo.concavidade(antes))
+            assert valor == algoritmo.concavidade(depois)
+
+
+def test_desvio_pelo_rabo_antes_de_comer_e_simulado_no_prazo():
+    g = Jogo(15, [(8, 7), (0, 0)])
+    algoritmo = Algoritmo()
+    algoritmo.configurar(15)
+    valor, rota = algoritmo.desviar_pelo_rabo(g)
+    assert valor[0] and rota[0] != g.comida
+    assert len(rota) <= g.nivel.limite
+    futuro = simular(g.corpo, rota, g.comida)
+    assert futuro is not None and futuro[0] == g.comida
+    assert len(futuro) == len(g.corpo) + 1

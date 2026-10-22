@@ -95,7 +95,7 @@ ambiente por cima do Python global.
 python -m pytest -m 'not slow'
 python -m pytest -m slow --qa-partidas 10
 python -m pytest -m slow
-python scripts/qa_algoritmo.py --partidas 1000
+python scripts/qa_algoritmo.py  # padrão: 200 por nível, exige 100%
 ```
 
 Os testes configuram SDL de vídeo/áudio dummy. Para desenvolver sem instalar

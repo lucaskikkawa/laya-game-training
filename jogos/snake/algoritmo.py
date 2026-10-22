@@ -2,7 +2,6 @@
 from collections import deque
 from heapq import heappop, heappush
 from itertools import count
-from random import Random
 from .regras import ACOES, Jogo, adjacentes, caminho_bfs
 
 
@@ -57,6 +56,8 @@ class Algoritmo:
         self._bits = {(x,y): 1 << (y*n+x) for y in range(n) for x in range(n)}
         self._linhas = [((1 << n)-1) << (y*n) for y in range(n)]
         self._colunas = [self._esquerda << x for x in range(n)]
+        self._vizinhos = [tuple(y * n + x for x, y in adjacentes((i % n, i // n), n))
+                          for i in range(n * n)]
         self._visitadas = {}
         self._comida = None
         self._rota = deque()
@@ -119,6 +120,49 @@ class Algoritmo:
                 total += (bits.bit_length() - (bits & -bits).bit_length()) // self._n + 1 - bits.bit_count()
         return total
 
+    def concavidade_apos_passo(self, antes, depois, rabo, cabeca, valor):
+        """Só as linhas/colunas do rabo e da nova cabeça podem mudar."""
+        def lacunas(bits, passo):
+            if not bits:
+                return 0
+            return (bits.bit_length() - (bits & -bits).bit_length()) // passo + 1 - bits.bit_count()
+
+        for y in {rabo[1], cabeca[1]}:
+            mascara = self._linhas[y]
+            valor += lacunas(depois & mascara, 1) - lacunas(antes & mascara, 1)
+        for x in {rabo[0], cabeca[0]}:
+            mascara = self._colunas[x]
+            valor += lacunas(depois & mascara, self._n) - lacunas(antes & mascara, self._n)
+        return valor
+
+    def gargalos(self, livres):
+        """Conta articulações: casas cuja ocupação separaria o espaço livre."""
+        ordem = [-1] * (self._n * self._n)
+        baixo = [0] * len(ordem)
+        relogio = count()
+        cortes = set()
+
+        def visitar(p, pai):
+            ordem[p] = baixo[p] = next(relogio)
+            filhos = 0
+            for q in self._vizinhos[p]:
+                if not livres & (1 << q):
+                    continue
+                if ordem[q] == -1:
+                    filhos += 1
+                    visitar(q, p)
+                    baixo[p] = min(baixo[p], baixo[q])
+                    if pai != -1 and baixo[q] >= ordem[p]:
+                        cortes.add(p)
+                elif q != pai:
+                    baixo[p] = min(baixo[p], ordem[q])
+            if pai == -1 and filhos > 1:
+                cortes.add(p)
+
+        if livres:
+            visitar((livres & -livres).bit_length() - 1, -1)
+        return len(cortes)
+
     def pontuar(self, corpo, rota, comida, meta, limite):
         futuro = simular(corpo, rota, comida)
         if futuro is None:
@@ -133,7 +177,7 @@ class Algoritmo:
         if not adj:
             return None
         inicio = adj & -adj
-        vistos, _, raio = self.avaliar(inicio, livres, 0)
+        vistos, _, _ = self.avaliar(inicio, livres, 0)
         if not self.expandir(vistos) & self._bits[futuro[-1]]:
             return None
         risco = livres.bit_count() - vistos.bit_count()
@@ -143,14 +187,16 @@ class Algoritmo:
         d = livres >> self._n
         dois = (a & b) | (a & c) | (a & d) | (b & c) | (b & d) | (c & d)
         becos = (livres & ~dois).bit_count()
-        return (risco == 0 and becos == 0 and raio + 1 <= limite,
-                -(risco + becos) * self._n*self._n - max(0, raio + 1 - limite),
+        gargalos = self.gargalos(livres) if risco == 0 and becos == 0 else 0
+        return (risco == 0 and becos == 0 and gargalos == 0,
+                -(risco + becos + gargalos) * self._n*self._n,
                 -len(rota) - 2 * self.concavidade(ocupadas))
 
     def reparar(self, corpo, rota, comida, meta, limite, prazo):
         valor = self.pontuar(corpo, rota, comida, meta, limite)
         if valor is None:
             return None
+        valor_inicial = valor
         ocupadas = set(corpo[1:]) | set(rota) | {corpo[0]}
         while len(rota) + 2 <= prazo:
             pontos = [corpo[0]] + rota
@@ -163,7 +209,7 @@ class Algoritmo:
                         continue
                     nova = rota[:i] + [c,d] + rota[i:]
                     v = self.pontuar(corpo,nova,comida,meta,limite)
-                    if v and (v[0] or v[1] > valor[1]) and (melhor is None or v > melhor[0]):
+                    if v and (v[0] or v[1] >= valor[1]) and (melhor is None or v > melhor[0]):
                         melhor = v,nova,c,d
             if melhor is None:
                 break
@@ -171,7 +217,7 @@ class Algoritmo:
             ocupadas.update((c,d))
             if valor[0]:
                 return rota
-        return None
+        return rota if valor > valor_inicial else None
 
     def defeitos(self, ocupadas):
         livres = self._todas & ~ocupadas
@@ -182,16 +228,17 @@ class Algoritmo:
         dois = (a & b) | (a & c) | (a & d) | (b & c) | (b & d) | (c & d)
         return (livres & ~dois).bit_count()
 
-    def busca(self, jogo, largura=64):
+    def busca(self, jogo, largura=1024):
         corpo = tuple(jogo.corpo)
         prazo = jogo.nivel.limite - jogo.sem_comer
         comida = jogo.comida
         ocupadas = sum(self._bits[p] for p in corpo)
-        fila = [(corpo, ocupadas, ())]
+        fila = [(corpo, ocupadas, (), self.concavidade(ocupadas))]
         melhor = None
         for tempo in range(1, prazo + 1):
             candidatas = []
-            for corpo, ocupadas, rota in fila:
+            formas = set()
+            for corpo, ocupadas, rota, concavidade_atual in fila:
                 livres = ocupadas & ~self._bits[corpo[-1]]
                 for p in adjacentes(corpo[0], self._n):
                     bit = self._bits[p]
@@ -211,23 +258,115 @@ class Algoritmo:
                         continue
                     futuro = (p,) + corpo[:-1]
                     mascara = livres | bit
+                    # A ordem define a liberação de cada casa: ocupação igual
+                    # não implica o mesmo futuro nem as mesmas rotas possíveis.
+                    forma = futuro
+                    if forma in formas:
+                        continue
+                    formas.add(forma)
                     defeitos = self.defeitos(mascara)
-                    concavidade = self.concavidade(mascara)
-                    candidatas.append((distancia + defeitos * 5 + concavidade * 0.5, distancia, futuro, mascara, nova))
+                    concavidade = self.concavidade_apos_passo(
+                        ocupadas, mascara, corpo[-1], p, concavidade_atual)
+                    candidatas.append((distancia + defeitos * 5 + concavidade * 0.5,
+                                       distancia, futuro, mascara, nova, concavidade))
             candidatas.sort(key=lambda c: c[:2])
             fila = []
             por_cabeca = {}
-            for _, _, corpo, mascara, rota in candidatas:
+            for _, _, corpo, mascara, rota, concavidade in candidatas:
                 quant = por_cabeca.get(corpo[0], 0)
-                if quant >= 2:
+                if quant >= 16:
                     continue
                 por_cabeca[corpo[0]] = quant + 1
-                fila.append((corpo, mascara, rota))
+                fila.append((corpo, mascara, rota, concavidade))
                 if len(fila) >= largura:
                     break
             if not fila:
                 break
         return list(melhor[1]) if melhor else []
+
+    def busca_corpo(self, jogo, orcamento=50000):
+        """A* sobre o corpo inteiro para atravessar liberações tardias do rabo."""
+        inicio = tuple(jogo.corpo)
+        comida = jogo.comida
+        prazo = jogo.nivel.limite - jogo.sem_comer
+        # Distâncias temporais até a comida, ignorando apenas o corpo novo.
+        # Manhattan não enxerga portas que abrem tarde: a busca pode gastar
+        # todo o orçamento em aproximações que nunca chegam dentro do prazo.
+        tamanho = self._n * self._n
+        libera = [0] * tamanho
+        for i, (x, y) in enumerate(inicio):
+            libera[y * self._n + x] = len(inicio) - i
+        alvo = comida[1] * self._n + comida[0]
+        distancias = [[prazo + 1] * tamanho for _ in range(prazo + 1)]
+        for t in range(prazo, -1, -1):
+            distancias[t][alvo] = 0
+            if t == prazo:
+                continue
+            for p, vizinhos in enumerate(self._vizinhos):
+                if p != alvo and (libera[p] <= t or (t == 0 and p == inicio[0][1] * self._n + inicio[0][0])):
+                    distancias[t][p] = 1 + min(distancias[t + 1][q] for q in vizinhos)
+        serial = count()
+        fila = [(0, 0, next(serial), inicio, ())]
+        vistos = {inicio: 0}
+        alternativa = []
+        melhor = None
+        for _ in range(orcamento):
+            if not fila:
+                break
+            _, negativo_tempo, _, corpo, rota = heappop(fila)
+            tempo = -negativo_tempo
+            if corpo[0] == comida:
+                valor = self.pontuar(inicio, rota, comida, jogo.nivel.meta, jogo.nivel.limite)
+                if valor and (melhor is None or valor > melhor[0]):
+                    melhor = valor, list(rota)
+                    if valor[0]:
+                        return list(rota)
+                alternativa = alternativa or list(rota)
+                continue
+            if tempo >= prazo:
+                continue
+            ocupadas = set(corpo[:-1])
+            for p in adjacentes(corpo[0], self._n):
+                if p in ocupadas:
+                    continue
+                t = tempo + 1
+                distancia = distancias[t][p[1] * self._n + p[0]]
+                if t + distancia > prazo:
+                    continue
+                futuro = (p,) + (corpo if p == comida else corpo[:-1])
+                if vistos.get(futuro, prazo + 1) <= t:
+                    continue
+                vistos[futuro] = t
+                heappush(fila, (t + distancia, -t, next(serial), futuro, rota + (p,)))
+        return melhor[1] if melhor else alternativa
+
+    def desviar_pelo_rabo(self, jogo):
+        """Libera corpo antes de se aproximar da comida, sem passar do prazo."""
+        corpo, comida = jogo.corpo, jogo.comida
+        prazo = jogo.nivel.limite - jogo.sem_comer
+        rabo = caminho_bfs(corpo[0], corpo[-1], corpo[1:-1] + [comida], self._n)
+        if not rabo:
+            return None
+        desvios = [rabo, alongar([corpo[0]] + rabo, corpo[1:-1] + [comida], self._n, prazo)]
+        melhor = None
+        for desvio in desvios:
+            futuro = list(corpo)
+            prefixo = []
+            for p in desvio[:prazo - 1]:
+                futuro = simular(futuro, [p], comida)
+                if futuro is None or p == comida:
+                    break
+                prefixo.append(p)
+                rota = self.caminho(futuro, comida, prazo - len(prefixo))
+                if not rota:
+                    continue
+                candidata = prefixo + rota
+                valor = self.pontuar(corpo, candidata, comida, jogo.nivel.meta, jogo.nivel.limite)
+                if valor and (melhor is None or valor > melhor[0]):
+                    melhor = valor, candidata
+                    if valor[0]:
+                        return melhor
+        return melhor
 
     def ponderado(self, corpo, comida, peso, contato, prazo):
         bloqueadas = set(corpo[1:-1])
@@ -305,7 +444,32 @@ class Algoritmo:
                     melhor = valor,candidata
         if melhor and melhor[0][0]:
             return melhor[1]
-        return self.busca(jogo)
+        if melhor:
+            reparada = self.reparar(corpo, melhor[1], comida, jogo.nivel.meta,
+                                    jogo.nivel.limite, prazo)
+            if reparada:
+                valor = self.pontuar(corpo, reparada, comida, jogo.nivel.meta, jogo.nivel.limite)
+                melhor = valor, reparada
+                if valor[0]:
+                    return reparada
+        alternativa = self.busca(jogo)
+        if alternativa:
+            valor = self.pontuar(corpo, alternativa, comida, jogo.nivel.meta, jogo.nivel.limite)
+            if valor and (melhor is None or valor > melhor[0]):
+                melhor = valor, alternativa
+        if melhor and melhor[0][0]:
+            return melhor[1]
+        desvio = self.desviar_pelo_rabo(jogo)
+        if desvio and (melhor is None or desvio[0] > melhor[0]):
+            melhor = desvio
+            if melhor[0][0]:
+                return melhor[1]
+        alternativa = self.busca_corpo(jogo)
+        if alternativa:
+            valor = self.pontuar(corpo, alternativa, comida, jogo.nivel.meta, jogo.nivel.limite)
+            if melhor is None or (valor and valor > melhor[0]):
+                return alternativa
+        return melhor[1] if melhor else alternativa
 
     def escolher(self, jogo: Jogo) -> str:
         n = jogo.nivel.tamanho

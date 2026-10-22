@@ -25,7 +25,8 @@ progresso e resumo, sem desenhar o tabuleiro.
 | 15 × 15 | 50 | 60 |
 | 20 × 20 | 90 | 80 |
 | 25 × 25 | 140 | 100 |
-| 30 × 30 | 200 | 120 |
+
+30 × 30 adiado para depois da v0.1; configuração preservada em `NIVEIS_ADIADOS`.
 
 Paredes e corpo matam. O rabo desocupa sua casa no mesmo passo, salvo ao comer.
 Uma comida vale `max(10, 100 - 10 × excesso)`; o excesso usa a distância BFS
@@ -80,10 +81,10 @@ python3 -m venv .venv
 .venv/bin/python -m pip install pytest pygame-ce==2.5.8 numpy==2.5.4
 .venv/bin/python -m pytest -m 'not slow'
 .venv/bin/python -m pytest -m slow --qa-partidas 10
-.venv/bin/python scripts/qa_algoritmo.py --partidas 1000
+.venv/bin/python scripts/qa_algoritmo.py  # padrão: 200 por nível, exige 100%
 ```
 
 Os testes configuram `SDL_VIDEODRIVER=dummy` e `SDL_AUDIODRIVER=dummy`.
-O QA completo exige 1000 partidas por nível; a opção rápida reduz a amostra,
+O teste slow ampliado exige 1000 partidas por nível; a opção rápida reduz a amostra,
 não o critério de 100%. Nenhuma derrota é descartada ou substituída. O script
 salva as listas das falhas para reprodução e retorna código 1 se houver derrota.

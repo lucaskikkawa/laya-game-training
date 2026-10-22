@@ -22,7 +22,8 @@ class Nivel:
 
 
 NIVEIS = {n: Nivel(n, meta, limite) for n, meta, limite in
-          ((15, 50, 60), (20, 90, 80), (25, 140, 100), (30, 200, 120))}
+          ((15, 50, 60), (20, 90, 80), (25, 140, 100))}
+NIVEIS_ADIADOS = {30: Nivel(30, 200, 120)}
 
 
 def adjacentes(p: Celula, n: int):
@@ -53,6 +54,30 @@ def caminho_bfs(inicio: Celula, fim: Celula, bloqueados: Iterable[Celula], n: in
     return None
 
 
+def alcancaveis_no_prazo(corpo: list[Celula], n: int, limite: int) -> set[Celula]:
+    """Busca (casa, tempo); segmento i libera no passo len(corpo)-i.
+
+    Sem espera parada. Uma chegada posterior pode encontrar o rabo já livre,
+    por isso não se eliminam casas visitadas em tempos anteriores.
+    """
+    bits = [1 << (y * n + x) for x, y in corpo]
+    ocupadas = sum(bits)
+    todas = (1 << (n * n)) - 1
+    esquerda = sum(1 << (y * n) for y in range(n))
+    direita = esquerda << (n - 1)
+    fronteira = alcancadas = bits[0]
+    for tempo in range(1, limite + 1):
+        if tempo <= len(bits):
+            ocupadas &= ~bits[-tempo]
+        fronteira = (((fronteira & ~direita) << 1)
+                     | ((fronteira & ~esquerda) >> 1)
+                     | (fronteira << n) | (fronteira >> n)) & todas & ~ocupadas
+        alcancadas |= fronteira
+        if not fronteira:
+            break
+    return {(i % n, i // n) for i in range(n * n) if alcancadas & (1 << i)}
+
+
 def lista_comidas(n: int, quantidade: int = 20000) -> list[Celula]:
     return [(randbelow(n), randbelow(n)) for _ in range(quantidade)]
 
@@ -67,8 +92,11 @@ class Jogo:
         if any(len(p) != 2 or not all(isinstance(v, int) for v in p)
                or not all(0 <= v < nivel for v in p) for p in self.comidas):
             raise ValueError("Lista de comidas contém coordenadas inválidas")
+        self.comidas = [tuple(p) for p in self.comidas]
         self.indice_comida = 0
         self.comida = None
+        self.pulos = []
+        self.comidas_efetivas = []
         self.pontos = self.passos = self.sem_comer = self.comidas_consumidas = 0
         self.ideal_comida = None
         self.fim = False
@@ -79,11 +107,18 @@ class Jogo:
     def _nova_comida(self):
         self.comida = None
         ocupadas = set(self.corpo)
+        alcancaveis = alcancaveis_no_prazo(self.corpo, self.nivel.tamanho, self.nivel.limite)
         while self.indice_comida < len(self.comidas):
             p = self.comidas[self.indice_comida]
             self.indice_comida += 1
-            if p not in ocupadas:
+            motivo = "ocupada" if p in ocupadas else "inalcancavel" if p not in alcancaveis else None
+            if motivo:
+                self.pulos.append({"indice": self.indice_comida - 1, "posicao": p,
+                                   "motivo": motivo, "passo": self.passos})
+            else:
                 self.comida = p
+                self.comidas_efetivas.append({"indice": self.indice_comida - 1,
+                                             "posicao": p, "passo": self.passos})
                 rota = caminho_bfs(self.corpo[0], p, self.corpo[1:], self.nivel.tamanho)
                 self.ideal_comida = len(rota) if rota is not None else None
                 return

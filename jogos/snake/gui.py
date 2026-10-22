@@ -343,6 +343,8 @@ class Aplicativo:
         pps = sum(r["passos_por_segundo"] for r in resultados) / max(1, len(resultados))
         self.texto(f"Velocidade medida: {pps:.2f} passos/s · Registros em {s.pasta.name}", 90, 550, 21, MUTED)
         self.hardware(90, 605)
+        if not s.documento["valida_para_treino"]:
+            self.texto("Sessão excluída do treino: o algoritmo perdeu uma partida.", 90, 640, 22, VERMELHO)
         if not s.concluida:
             self.botao("Próxima partida", (90, 680, 240, 50), "proxima")
         self.botao("Repetir · Nova sessão", (360, 680, 240, 50), "retry")
