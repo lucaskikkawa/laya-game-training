@@ -14,12 +14,19 @@ def salvar_json(caminho: Path, dados):
     temporario.replace(caminho)
 
 
-def comparar(registros, laya, algoritmo):
+def comparar(registros, laya, algoritmo, passos_algoritmo=()):
     acordos = [r["escolha"] == r["jogada_ideal"] for r in registros]
     return {"geral": {"laya": laya, "algoritmo": algoritmo,
                       "diferenca_pontos": laya["pontos"] - algoritmo["pontos"],
                       "diferenca_passos": laya["passos"] - algoritmo["passos"]},
-            "passo_a_passo": [{"passo": i + 1, "concorda": c} for i, c in enumerate(acordos)],
+            # O gabarito local avalia o estado do Laya. A partida independente
+            # pode divergir e durar mais; conservar as duas linhas até o fim.
+            "passo_a_passo": [
+                {"passo": i + 1,
+                 "concorda": acordos[i] if i < len(acordos) else None,
+                 "laya": registros[i] if i < len(registros) else None,
+                 "algoritmo": passos_algoritmo[i] if i < len(passos_algoritmo) else None}
+                for i in range(max(len(registros), len(passos_algoritmo)))],
             "concordancia": sum(acordos) / len(acordos) if acordos else 0.0}
 
 
@@ -96,7 +103,7 @@ class Sessao:
                     "direcao": jogo.direcao, "corpo": list(jogo.corpo), "comida": jogo.comida,
                     "indice_comida": self.cursor + jogo.indice_comida - 1,
                     "ideal_bfs_ao_aparecer": jogo.ideal_comida, "passos_sem_comer": jogo.sem_comer,
-                    "probabilidades": decisao.probabilidades, "escolha": decisao.escolha,
+                    "probabilidades": dict(decisao.probabilidades), "escolha": decisao.escolha,
                     "confianca": decisao.confianca, "jogada_ideal": ideal,
                     "latencia_ms": decisao.latencia_ms}
         registro["pontos_ganhos"] = jogo.passo(decisao.escolha)
@@ -123,15 +130,19 @@ class Sessao:
         passos = []
         inicio = perf_counter()
         while not gabarito.fim:
+            inicio_passo = perf_counter()
             acao = algoritmo.escolher(gabarito)
-            passos.append({"passo": gabarito.passos + 1, "estado": gabarito.estado(), "escolha": acao,
-                           "estrategia": algoritmo.estrategia})
-            gabarito.passo(acao)
+            registro = {"passo": gabarito.passos + 1, "estado": gabarito.estado(), "escolha": acao,
+                        "estrategia": algoritmo.estrategia,
+                        "latencia_ms": (perf_counter() - inicio_passo) * 1000}
+            registro["pontos_ganhos"] = gabarito.passo(acao)
+            registro["pontos"] = gabarito.pontos
+            passos.append(registro)
         tempo = perf_counter() - inicio
         salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
             "inicio_lista": self.cursor, "passos": passos, "resumo": gabarito.resumo(),
             "segundos": tempo, "passos_por_segundo": gabarito.passos / max(tempo, 1e-9)})
-        comparacao = comparar(self.registros, self.jogo.resumo(), gabarito.resumo())
+        comparacao = comparar(self.registros, self.jogo.resumo(), gabarito.resumo(), passos)
         salvar_json(self.pasta / f"{identificador}_comparacao.json", comparacao)
         resultado = {"run": self.indice + 1, "inicio_lista": self.cursor,
                      "comparacao": comparacao, "passos_por_segundo": laya["passos_por_segundo"],

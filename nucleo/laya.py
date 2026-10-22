@@ -25,6 +25,8 @@ class Laya:
         self._torch = torch
         device = "cuda" if not self.cpu and torch.cuda.is_available() else "cpu"
         # load já trata falha de alocação CUDA com fallback CPU.
+        # load retorna um Agent. Router faz seleção de idioma/checkpoint e não é
+        # necessário aqui: cada run deve usar exatamente a versão selecionada.
         self.agent = laya.load(origem, device=device)
         self.dispositivo = str(self.agent.device)
         if self.dispositivo.startswith("cuda"):
@@ -35,6 +37,11 @@ class Laya:
         self.carregamento_ms = (perf_counter() - inicio) * 1000
 
     def telemetria(self) -> dict:
+        # O Agent pode permanecer em CPU depois de um fallback durante inferência.
+        if self.agent is not None:
+            self.dispositivo = str(self.agent.device)
+            if not self.dispositivo.startswith("cuda"):
+                self.gpu = ""
         dados = {"dispositivo": self.dispositivo, "gpu": self.gpu,
                  "precisao": str(getattr(self.agent, "dtype", "")),
                  "carregamento_ms": self.carregamento_ms}
@@ -46,6 +53,8 @@ class Laya:
         return dados
 
     def decidir(self, estado: str, opcoes: tuple[Opcao, ...]) -> Decisao:
+        if len(opcoes) != 3 or len({o.id for o in opcoes}) != 3:
+            raise ValueError("São necessárias três opções distintas")
         self.carregar()
         perguntas = {"move": {"type": "choice", "instructions":
             "Choose the effect that keeps self alive and reaches reward efficiently.",
@@ -55,16 +64,22 @@ class Laya:
         latencia = (perf_counter() - inicio) * 1000
         if resposta.get("usage", {}).get("truncated"):
             raise RuntimeError("O estado foi truncado pelo Laya; a run não pode continuar com mapa incompleto.")
-        resposta = resposta["answers"]["move"]
-        probs = {o.id: float(resposta["probabilities"][o.id]) for o in opcoes}
+        try:
+            resposta = resposta["answers"]["move"]
+            if set(resposta["probabilities"]) != {o.id for o in opcoes}:
+                raise ValueError("Probabilidades devem conter as três opções")
+            probs = {o.id: float(resposta["probabilities"][o.id]) for o in opcoes}
+            escolha = resposta["choice"]
+            confianca = float(resposta["confidence"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Resposta choice inválida recebida do Laya") from exc
         if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probs.values()):
             raise ValueError("Probabilidades inválidas recebidas do Laya")
         total = sum(probs.values())
-        if total <= 0 or resposta["choice"] not in probs:
+        if total <= 0 or not isinstance(escolha, str) or escolha not in probs:
             raise ValueError("Resposta choice inválida recebida do Laya")
         # A biblioteca arredonda quatro casas; normalizar a soma para o registro/painel.
         probs = {k: v / total for k, v in probs.items()}
-        confianca = float(resposta["confidence"])
         if not math.isfinite(confianca) or not 0 <= confianca <= 1:
             raise ValueError("Confiança inválida recebida do Laya")
-        return Decisao(probs, resposta["choice"], confianca, latencia)
+        return Decisao(probs, escolha, confianca, latencia)

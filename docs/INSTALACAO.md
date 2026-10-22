@@ -11,8 +11,8 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    cd C:\Users\lucas\laya-games
    ```
 
-2. Execute o instalador. Ele cria o venv, instala as versões fixadas, baixa o
-   modelo público e informa se CUDA está disponível e qual GPU foi detectada:
+2. Execute o instalador (Windows PowerShell 5.1 ou PowerShell 7). Ele cria o venv, instala as versões fixadas, baixa o
+   modelo público (checkpoint inglês da raiz) e informa se CUDA está disponível e qual GPU foi detectada:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\instalar.ps1
@@ -28,6 +28,7 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    criar um clone local do checkout de origem. Não sobrescreve arquivos existentes.
    Não execute como administrador. Se uma versão fixada não estiver disponível,
    a instalação para com erro; o script não troca versões silenciosamente.
+   Pode executá-lo novamente: reutiliza o venv, as versões instaladas e o snapshot local.
 
 3. O instalador define `LAYA_HOME` como a raiz que contém `modelos/` e `runs/`.
    Abra um novo PowerShell ou defina a variável na janela atual:
@@ -38,11 +39,15 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    python -m jogos.snake --partidas 1 --nivel 15 --versao v000 --modo normal
    ```
 
-   Na seleção, confira nível, versão e velocidade. Clique **Start** para conectar
+   Na seleção, confira nível, versão e velocidade. Clique **Iniciar** para conectar
    ao Laya. A primeira conexão pode demorar. O modo normal começa em 1 passo/s.
-   O jogo mostra a run, as decisões e o resultado; Retry cria uma nova sessão.
-   Não é necessário ativar o venv se usar diretamente
-   `.\.venv\Scripts\python.exe -m jogos.snake`.
+   O jogo mostra a run, as decisões e o resultado; Repetir cria uma nova sessão.
+   Comandos completos sem ativar o venv, para uma partida normal no mapa 15×15:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m jogos.snake --partidas 1 --nivel 15 --versao v000 --modo normal
+   .\.venv\Scripts\python.exe -m jogos.snake --partidas 1 --nivel 15 --versao v000 --modo normal --cpu
+   ```
 
 4. Para uma sessão rápida:
 
@@ -50,7 +55,7 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    python -m jogos.snake --partidas 50 --nivel 20 --versao v000 --modo rapido --passos-por-segundo 5
    ```
 
-   Clique Start na janela. A tela mostra progresso, tempo e resumo parcial,
+   Clique Iniciar na janela. A tela mostra progresso, tempo e resumo parcial,
    sem desenhar o tabuleiro. A velocidade pedida é um teto: a inferência pode
    limitar a velocidade real, que é medida nos JSONs. `--cpu` força CPU.
 

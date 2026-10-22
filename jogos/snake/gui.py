@@ -142,7 +142,7 @@ class Aplicativo:
                     self.sons.tocar("comida")
                 if self.jogo.fim:
                     self.estado = "apurando"
-                    self.status = "Salvando a run e calculando a partida do algoritmo..."
+                    self.status = "Salvando a partida e calculando a partida do algoritmo..."
                     if self.modo == "normal":
                         self.sons.tocar("vitoria" if self.jogo.vitoria else "morte")
                     self._enviar("finalizar", self.sessao.finalizar_run)
@@ -192,7 +192,7 @@ class Aplicativo:
         self.campo("partidas", self.partidas, (525, 450, 100, 46))
         self.botao(f"Automático: {'sim' if self.automatico else 'não'}", (655, 450, 215, 46), "auto")
         self.controles_velocidade(84, 530)
-        self.botao("Start · Conectar ao Laya", (84, 630, 300, 55), "start")
+        self.botao("Iniciar · Conectar ao Laya", (84, 630, 300, 55), "start")
         self.botao("Treinar · em breve, v0.2", (410, 630, 270, 55), "treinar", False)
         self.texto("F11: tela cheia     Tab: mostrar/esconder painel     Esc: voltar", 84, 755, 19, MUTED)
         self.texto("Dispositivo: " + ("CPU solicitado" if self.args.cpu else "CUDA se disponível, senão CPU"), 84, 705, 19, MUTED)
@@ -298,16 +298,16 @@ class Aplicativo:
         if self.sessao:
             s = self.sessao
             total = s.partidas
-            self.texto(f"Runs concluídas: {s.indice} de {total}", 100, 330, 32)
+            self.texto(f"Partidas concluídas: {s.indice} de {total}", 100, 330, 32)
             pygame.draw.rect(self.canvas, CARTAO, (100, 395, 1000, 26), border_radius=10)
             pygame.draw.rect(self.canvas, VERDE, (100, 395, int(1000 * s.indice / total), 26), border_radius=10)
             segundos = perf_counter() - s.inicio
             self.texto(f"Tempo: {segundos:.0f} s", 100, 460, 24)
             if s.resultados:
                 pontos = sum(r["comparacao"]["geral"]["laya"]["pontos"] for r in s.resultados)
-                self.texto(f"Resumo parcial: {pontos} pontos nas runs concluídas", 100, 505, 24)
+                self.texto(f"Resumo parcial: {pontos} pontos nas partidas concluídas", 100, 505, 24)
             if self.jogo:
-                self.texto(f"Run atual: {self.jogo.passos} passos · {self.jogo.pontos} pontos", 100, 555, 24)
+                self.texto(f"Partida atual: {self.jogo.passos} passos · {self.jogo.pontos} pontos", 100, 555, 24)
             self.hardware(100, 650)
 
     def hardware(self, x, y):
@@ -324,7 +324,7 @@ class Aplicativo:
 
     def desenhar_resultado(self):
         s = self.sessao
-        titulo = "Resumo da sessão" if self.modo == "rapido" else f"Resultado da run {s.indice}"
+        titulo = "Resumo da sessão" if self.modo == "rapido" else f"Resultado da partida {s.indice}"
         self.texto(titulo, 90, 145, 42)
         resultados = s.resultados if self.modo == "rapido" else s.resultados[-1:]
         for i, (nome, chave) in enumerate((("Laya", "laya"), ("Algoritmo", "algoritmo"))):
@@ -339,13 +339,13 @@ class Aplicativo:
         registros = self.sessao.registros
         media = sum(r["latencia_ms"] for r in registros) / max(1, len(registros))
         concordancia = sum(r["comparacao"]["concordancia"] for r in resultados) / max(1, len(resultados))
-        self.texto(f"Concordância: {concordancia:.1%} · Latência média da última run: {media:.1f} ms", 90, 505, 22)
+        self.texto(f"Concordância: {concordancia:.1%} · Latência média da última partida: {media:.1f} ms", 90, 505, 22)
         pps = sum(r["passos_por_segundo"] for r in resultados) / max(1, len(resultados))
         self.texto(f"Velocidade medida: {pps:.2f} passos/s · Registros em {s.pasta.name}", 90, 550, 21, MUTED)
         self.hardware(90, 605)
         if not s.concluida:
             self.botao("Próxima partida", (90, 680, 240, 50), "proxima")
-        self.botao("Retry · Nova sessão", (360, 680, 240, 50), "retry")
+        self.botao("Repetir · Nova sessão", (360, 680, 240, 50), "retry")
         self.botao("Seleção", (630, 680, 180, 50), "selecao")
         self.botao("Treinar · em breve, v0.2", (845, 680, 300, 50), "treinar", False)
 
@@ -353,7 +353,7 @@ class Aplicativo:
         self.canvas.fill(FUNDO)
         self.botoes.clear()
         self.campos.clear()
-        self.texto("LAYA GAMES / SNAKE", 25, 20, 22, MUTED)
+        self.texto("LAYA GAMES / COBRINHA", 25, 20, 22, MUTED)
         if self.estado == "selecao":
             self.desenhar_selecao()
         elif self.estado == "resultado":
@@ -366,13 +366,13 @@ class Aplicativo:
             self.botao("Voltar à seleção", (70, 380, 260, 50), "selecao")
         else:
             self.texto(f"Placar: {round(self.placar)}", 30, 60, 28, VERDE)
-            self.texto(f"Run {self.sessao.indice + 1}/{self.sessao.partidas}", 350, 65, 22)
+            self.texto(f"Partida {self.sessao.indice + 1}/{self.sessao.partidas}", 350, 65, 22)
             self.hardware(600, 28)
             self.desenhar_tabuleiro()
             if self.painel:
                 self.desenhar_painel()
             self.controles_velocidade(30, 805)
-            self.botao("Retry", (365, 805, 100, 44), "retry", not self.futuro)
+            self.botao("Repetir", (365, 805, 100, 44), "retry", not self.futuro)
             self.botao(f"Auto: {'sim' if self.automatico else 'não'}", (485, 805, 150, 44), "auto")
             self.botao("Treinar · v0.2", (650, 805, 130, 44), "treinar", False)
         if self.erro:
@@ -419,6 +419,8 @@ class Aplicativo:
     def evento(self, event):
         if event.type == pygame.QUIT:
             self.rodando = False
+        elif event.type == pygame.VIDEORESIZE and not self.cheia:
+            self.tela = pygame.display.set_mode((max(1, event.w), max(1, event.h)), pygame.RESIZABLE)
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F11:
                 self.cheia = not self.cheia

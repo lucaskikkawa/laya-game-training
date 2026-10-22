@@ -70,3 +70,54 @@ def test_respostas_invalidas_ou_truncadas(alteracao, erro):
     laya.agent = SimpleNamespace(system_one=lambda *a, **kw: resposta)
     with pytest.raises(erro):
         laya.decidir("state", OPCOES)
+
+
+def test_modelo_local_fp16_e_fallback_real(monkeypatch, tmp_path):
+    monkeypatch.setenv("LAYA_HOME", str(tmp_path))
+    pasta = tmp_path / "modelos" / "laya_v000"
+    pasta.mkdir(parents=True)
+    chamadas = []
+    agente = SimpleNamespace(device="cuda:0", dtype="fp32")
+    def load(origem, device):
+        chamadas.append((origem, device))
+        return agente
+    cuda = SimpleNamespace(is_available=lambda: True, get_device_name=lambda d: "GTX teste")
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=cuda, float16="fp16"))
+    monkeypatch.setitem(sys.modules, "laya", SimpleNamespace(load=load))
+    laya = Laya()
+    laya.carregar()
+    assert chamadas == [(str(pasta), "cuda")]
+    assert agente.dtype == "fp16" and agente.amp_enabled
+    # A biblioteca pode demover permanentemente o Agent durante system_one.
+    agente.device, agente.dtype, agente.amp_enabled = "cpu", "fp32", False
+    dados = laya.telemetria()
+    assert dados["dispositivo"] == "cpu" and dados["gpu"] == ""
+    assert dados["precisao"] == "fp32"
+    assert not any(k.startswith("vram_") for k in dados)
+
+
+def test_probabilidades_por_rotulo_e_arredondamento():
+    def system_one(state, questions, lang):
+        assert state == "mapa completo"
+        assert questions["move"]["criteria"] == {o.id: o.efeito for o in OPCOES}
+        assert lang == "en"
+        # Mesmo formato de Agent._decode_answers, com ordem diferente e soma .9999.
+        return {"usage": {"truncated": False}, "answers": {"move": {
+            "type": "choice", "choice": "left", "confidence": .42,
+            "probabilities": {"right": .1111, "straight": .2222, "left": .6666}}}}
+    laya = Laya()
+    laya.agent = SimpleNamespace(system_one=system_one)
+    d = laya.decidir("mapa completo", OPCOES)
+    assert d.probabilidades == pytest.approx({"straight": 2/9, "left": 6/9, "right": 1/9})
+    assert d.escolha == "left" and d.confianca == .42
+
+
+@pytest.mark.parametrize("probs", [{"straight": 1},
+    {"straight": .3, "left": .3, "right": .3, "extra": .1},
+    {"straight": 0, "left": 0, "right": 0}])
+def test_exige_distribuicao_das_tres_opcoes(probs):
+    laya = Laya()
+    laya.agent = SimpleNamespace(system_one=lambda *a, **kw: {"answers": {"move": {
+        "probabilities": probs, "choice": "straight", "confidence": .5}}})
+    with pytest.raises(ValueError, match="choice"):
+        laya.decidir("estado", OPCOES)

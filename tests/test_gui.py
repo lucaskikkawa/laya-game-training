@@ -56,5 +56,28 @@ def test_gui_modo_rapido_sem_tabuleiro(tmp_path):
             app.desenhar()
             time.sleep(.001)
         assert app.estado == "resultado" and app.sessao.concluida, app.erro
+        assert app.sessao.indice == 2 and len(app.sessao.resultados) == 2
     finally:
         app.fechar()
+
+
+def test_normal_120_frames_redimensiona_e_alterna_painel(tmp_path, monkeypatch):
+    app = Aplicativo(argumentos(["--modo", "normal", "--nivel", "15"]), MockLaya(), tmp_path)
+    atualizar = app.atualizar
+    frames = []
+    tamanhos = []
+    def frame(dt):
+        if len(frames) == 30:
+            pygame.event.post(pygame.event.Event(pygame.VIDEORESIZE, w=960, h=640))
+        if len(frames) == 60:
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_TAB, unicode="\t"))
+        atualizar(dt)
+        frames.append(app.estado)
+        tamanhos.append(app.tela.get_size())
+    monkeypatch.setattr(app, "atualizar", frame)
+    app.acionar("start")
+    app.executar(max_frames=120)
+    assert len(frames) == 120 and frames.count("jogando") >= 110
+    assert app.jogo.passos >= 1 and not app.erro
+    assert tamanhos[-1] == (960, 640)
+    assert not app.painel
