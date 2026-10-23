@@ -29,3 +29,5 @@ logs/
 .env.*
 *.pem
 *.p12
+config/usuario.json
+config/usuario.json.tmp

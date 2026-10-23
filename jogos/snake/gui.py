@@ -6,6 +6,7 @@ import os
 import sys
 from time import perf_counter
 import pygame
+from nucleo import usuario
 from nucleo.config import versoes
 from nucleo.laya_processo import LayaProcesso
 from .regras import NIVEIS, NOMES_DIRECAO
@@ -61,7 +62,16 @@ class Aplicativo:
         except (pygame.error, IndexError):
             desktop = (1280, 860)
         self.tamanho_inicial = tamanho_inicial_janela(desktop)
-        self.tela = pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
+        self.config = usuario.carregar()
+        modos = pygame.display.list_modes()
+        self.resolucoes = [None]
+        if isinstance(modos, list):
+            self.resolucoes += [list(m) for m in dict.fromkeys(tuple(m) for m in modos)]
+        if self.config["resolucao"] not in self.resolucoes:
+            self.config["resolucao"] = None
+        self.cheia = self.config["tela_cheia"]
+        self.painel = self.config["painel"]
+        self._criar_display()
         pygame.display.set_caption("Laya Games · Snake v0.1")
         self.canvas = pygame.Surface((1280, 860))
         self.fontes = {}
@@ -75,9 +85,7 @@ class Aplicativo:
         self.automatico = args.auto_iniciar or args.partidas > 1
         self.decisor_injetado = decisor
         self.pasta_runs = pasta_runs
-        self.estado = "selecao"
-        self.painel = True
-        self.cheia = False
+        self.estado = "principal"
         self.rodando = True
         self._fechado = False
         self.botoes = []
@@ -100,6 +108,38 @@ class Aplicativo:
         self.placar = 0.0
         self.sons = Sons()
         self.status = "Escolha o nível e a versão."
+
+    def _criar_display(self, tamanho=None):
+        tamanho = tamanho or tuple(self.config["resolucao"] or
+                                   ((0, 0) if self.cheia else self.tamanho_inicial))
+        flags = pygame.FULLSCREEN if self.cheia else pygame.RESIZABLE
+        if self.config["vsync"]:
+            try:
+                self.tela = pygame.display.set_mode(tamanho, flags, vsync=1)
+                return
+            except (pygame.error, TypeError):
+                pass
+        self.tela = pygame.display.set_mode(tamanho, flags)
+
+    def aplicar_config(self):
+        anterior = self.config.copy()
+        self.config = usuario.validar(self.edicao_config)
+        mudou_modo = self.cheia != self.config["tela_cheia"]
+        self.cheia = self.config["tela_cheia"]
+        try:
+            if mudou_modo or any(self.config[k] != anterior[k] for k in ("resolucao", "tela_cheia", "vsync")):
+                self._criar_display()
+            usuario.salvar(self.config)
+        except (OSError, pygame.error) as exc:
+            self.config = anterior
+            self.cheia = anterior["tela_cheia"]
+            self._criar_display()
+            self.erro = f"Não foi possível aplicar as configurações: {exc}"
+            return
+        self.painel = self.config["painel"]
+        if not self.config["som"] and pygame.mixer.get_init():
+            pygame.mixer.stop()
+        self.erro = ""
 
     def fonte(self, tamanho=20, mono=False):
         chave = tamanho, mono
@@ -182,12 +222,12 @@ class Aplicativo:
                 self.ultimo_passo = perf_counter()
                 self.historico.append(valor)
                 self.acordos += valor["escolha"] == valor["jogada_ideal"]
-                if self.modo == "normal" and valor["pontos_ganhos"]:
+                if self.config["som"] and self.modo == "normal" and valor["pontos_ganhos"]:
                     self.sons.tocar("comida")
                 if self.jogo.fim:
                     self.estado = "apurando"
                     self.status = "Salvando a partida e calculando a partida do algoritmo..."
-                    if self.modo == "normal":
+                    if self.config["som"] and self.modo == "normal":
                         self.sons.tocar("vitoria" if self.jogo.vitoria else "morte")
                     self._enviar("finalizar", self.sessao.finalizar_run)
             elif tarefa == "finalizar":
@@ -224,6 +264,30 @@ class Aplicativo:
                 and agora >= self.proximo_passo):
             self._nova_run()
 
+    def desenhar_principal(self):
+        self.texto("Snake", 80, 110, 64, VERDE)
+        self.texto("Laya v0.1 · Decisões em tempo real", 84, 188, 28)
+        self.botao("Iniciar", (84, 310, 300, 55), "selecao")
+        self.botao("Configurações", (84, 390, 300, 55), "config")
+        self.botao("Sair", (84, 470, 300, 55), "sair")
+
+    def desenhar_config(self):
+        self.texto("Configurações", 80, 110, 44, VERDE)
+        c = self.edicao_config
+        resolucao = "Automática" if c["resolucao"] is None else " × ".join(map(str, c["resolucao"]))
+        opcoes = [
+            (f"Resolução: {resolucao}", "resolucao"),
+            ("Tela cheia" if c["tela_cheia"] else "Janela", "tela_cheia"),
+            (f"Limite de FPS: {c['fps'] or 'Sem limite'}", "fps"),
+            (f"Vsync: {'sim' if c['vsync'] else 'não'}", "vsync"),
+            (f"Painel do Laya: {'visível' if c['painel'] else 'oculto'}", "painel"),
+            (f"Som: {'sim' if c['som'] else 'não'}", "som"),
+        ]
+        for i, (titulo, chave) in enumerate(opcoes):
+            self.botao(titulo, (84, 220 + i * 65, 420, 48), "config_" + chave)
+        self.botao("Aplicar", (84, 650, 200, 55), "aplicar")
+        self.botao("Voltar", (310, 650, 200, 55), "principal")
+
     def desenhar_selecao(self):
         self.texto("Snake", 80, 110, 64, VERDE)
         self.texto("Laya v0.1 · Decisões em tempo real", 84, 188, 28)
@@ -238,8 +302,9 @@ class Aplicativo:
         self.campo("partidas", self.partidas, (525, 450, 100, 46))
         self.botao(f"Automático: {'sim' if self.automatico else 'não'}", (655, 450, 215, 46), "auto")
         self.controles_velocidade(84, 530)
-        self.botao("Iniciar · Conectar ao Laya", (84, 630, 300, 55), "start")
+        self.botao("Começar · Conectar ao Laya", (84, 630, 300, 55), "start")
         self.botao("Treinar · em breve, v0.2", (410, 630, 270, 55), "treinar", False)
+        self.botao("Voltar", (710, 630, 160, 55), "principal")
         self.texto("F11: tela cheia     Tab: mostrar/esconder painel     Esc: voltar", 84, 755, 19, MUTED)
         self.texto("Dispositivo: " + ("CPU solicitado" if self.args.cpu else "CUDA se disponível, senão CPU"), 84, 705, 19, MUTED)
 
@@ -402,7 +467,11 @@ class Aplicativo:
         self.botoes.clear()
         self.campos.clear()
         self.texto("LAYA GAMES / COBRINHA", 25, 20, 22, MUTED)
-        if self.estado == "selecao":
+        if self.estado == "principal":
+            self.desenhar_principal()
+        elif self.estado == "config":
+            self.desenhar_config()
+        elif self.estado == "selecao":
             self.desenhar_selecao()
         elif self.estado == "resultado":
             self.desenhar_resultado()
@@ -437,7 +506,26 @@ class Aplicativo:
         pygame.display.flip()
 
     def acionar(self, acao):
-        if acao == "nivel":
+        if acao == "sair":
+            self.rodando = False
+        elif acao == "principal":
+            self.estado = "principal"
+            self.foco = None
+            self.erro = ""
+        elif acao == "config":
+            self.edicao_config = self.config.copy()
+            self.estado = "config"
+            self.foco = None
+        elif acao == "aplicar":
+            self.aplicar_config()
+        elif acao.startswith("config_"):
+            chave = acao.removeprefix("config_")
+            if chave in ("resolucao", "fps"):
+                opcoes = self.resolucoes if chave == "resolucao" else usuario.LIMITES_FPS
+                self.edicao_config[chave] = opcoes[(opcoes.index(self.edicao_config[chave]) + 1) % len(opcoes)]
+            else:
+                self.edicao_config[chave] = not self.edicao_config[chave]
+        elif acao == "nivel":
             niveis = list(NIVEIS)
             self.nivel = niveis[(niveis.index(self.nivel) + 1) % len(niveis)]
         elif acao == "versao":
@@ -468,15 +556,19 @@ class Aplicativo:
         if event.type == pygame.QUIT:
             self.rodando = False
         elif event.type == pygame.VIDEORESIZE and not self.cheia:
-            self.tela = pygame.display.set_mode((max(1, event.w), max(1, event.h)), pygame.RESIZABLE)
+            self._criar_display((max(1, event.w), max(1, event.h)))
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F11:
                 self.cheia = not self.cheia
-                self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
+                self._criar_display()
             elif event.key == pygame.K_TAB:
                 self.painel = not self.painel
             elif event.key == pygame.K_ESCAPE:
-                if self.foco:
+                if self.estado in ("selecao", "config"):
+                    self.acionar("principal")
+                elif self.estado == "principal":
+                    self.foco = None
+                elif self.foco:
                     self.foco = None
                 elif not self.futuro:
                     self.acionar("selecao")
@@ -524,7 +616,7 @@ class Aplicativo:
             while self.rodando and (max_frames is None or frames < max_frames):
                 if self.args.auto_iniciar and self.erro:
                     break
-                dt = clock.tick(60) / 1000
+                dt = clock.tick(self.config["fps"]) / 1000
                 for event in pygame.event.get():
                     self.evento(event)
                 self.atualizar(dt)

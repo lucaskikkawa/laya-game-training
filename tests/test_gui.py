@@ -80,7 +80,7 @@ def test_cli_padroes():
 def test_gui_selecao_e_frames(tmp_path):
     app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
     app.executar(max_frames=5)
-    assert app.estado == "selecao"
+    assert app.estado == "principal"
     assert app.sessao is None
 
 
@@ -241,5 +241,134 @@ def test_resultado_avisa_exclusao_do_treino(tmp_path):
         app.texto = lambda texto, *args, **kwargs: textos.append(texto)
         app.desenhar_resultado()
         assert any('Sessão excluída do treino' in t for t in textos)
+    finally:
+        app.fechar()
+
+
+@pytest.fixture(autouse=True)
+def config_isolada(tmp_path, monkeypatch):
+    from nucleo import usuario
+    monkeypatch.setattr(usuario, "caminho_config", lambda: tmp_path / "config" / "usuario.json")
+
+
+def clicar(app, acao):
+    app.desenhar()
+    rect = next(r for r, a, ativo in app.botoes if a == acao and ativo)
+    d = app.destino
+    pos = (int(d.x + rect.centerx * d.width / 1280),
+           int(d.y + rect.centery * d.height / 860))
+    app.evento(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=pos))
+
+
+def test_navegacao_principal_setup_esc_e_sair(tmp_path):
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        assert app.estado == "principal"
+        clicar(app, "selecao")
+        assert app.estado == "selecao" and app.sessao is None
+        clicar(app, "principal")
+        assert app.estado == "principal"
+        clicar(app, "selecao")
+        app.foco = "partidas"
+        app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        assert app.estado == "principal" and app.foco is None
+        app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        assert app.rodando
+        clicar(app, "sair")
+        assert not app.rodando
+    finally:
+        app.fechar()
+
+
+def test_config_aplicar_voltar_e_carregar(tmp_path, monkeypatch):
+    from nucleo import usuario
+    monkeypatch.setattr(pygame.display, "list_modes", lambda: [(1024, 768), (800, 600)])
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        clicar(app, "config")
+        assert app.resolucoes == [None, [1024, 768], [800, 600]]
+        for chave in ("resolucao", "fps", "painel", "som"):
+            clicar(app, "config_" + chave)
+        clicar(app, "aplicar")
+        assert app.estado == "config"
+        assert app.tela.get_size() == (1024, 768)
+        assert app.config["fps"] == 120
+        assert not app.painel and not app.config["som"]
+        assert usuario.carregar() == app.config
+        clicar(app, "config_som")
+        clicar(app, "principal")
+        clicar(app, "config")
+        assert not app.edicao_config["som"]
+        app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        assert app.estado == "principal"
+    finally:
+        app.fechar()
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        assert app.tela.get_size() == (1024, 768)
+        assert not app.painel and not app.config["som"]
+    finally:
+        app.fechar()
+
+
+@pytest.mark.parametrize("falha", [pygame.error, TypeError])
+def test_vsync_fallback_e_tela_cheia(tmp_path, monkeypatch, falha):
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        chamadas = []
+        def set_mode(tamanho, flags, **kwargs):
+            chamadas.append((tamanho, flags, kwargs))
+            if kwargs:
+                raise falha("vsync indisponível")
+            return app.tela
+        monkeypatch.setattr(pygame.display, "set_mode", set_mode)
+        app.acionar("config")
+        app.acionar("config_vsync")
+        app.acionar("config_tela_cheia")
+        app.acionar("aplicar")
+        assert app.cheia and app.config["vsync"]
+        assert chamadas == [((0, 0), pygame.FULLSCREEN, {"vsync": 1}),
+                            ((0, 0), pygame.FULLSCREEN, {})]
+    finally:
+        app.fechar()
+
+
+def test_esc_jogo_retorna_selecao(tmp_path):
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        app.iniciar()
+        app.futuro.result(timeout=5)
+        app._coletar()
+        assert app.estado == "jogando"
+        app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        assert app.estado == "selecao"
+        assert app.sessao.documento["status"] == "interrompida"
+    finally:
+        app.fechar()
+
+
+def test_aplicar_restaura_modo_apos_f11(tmp_path):
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F11))
+        assert app.cheia
+        app.acionar("config")
+        app.acionar("aplicar")
+        assert not app.cheia
+        assert app.tela.get_size() == app.tamanho_inicial
+    finally:
+        app.fechar()
+
+
+@pytest.mark.parametrize("modos", [-1, []])
+def test_resolucao_indisponivel_usa_automatica(tmp_path, monkeypatch, modos):
+    from nucleo import usuario
+    usuario.salvar(dict(usuario.DEFAULTS, resolucao=[800, 600]))
+    monkeypatch.setattr(pygame.display, "list_modes", lambda: modos)
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        assert app.config["resolucao"] is None
+        assert app.resolucoes == [None]
+        assert app.tela.get_size() == app.tamanho_inicial
     finally:
         app.fechar()

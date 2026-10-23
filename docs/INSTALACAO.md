@@ -39,7 +39,8 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    python -m jogos.snake --nivel 15 --versao v000 --modo normal
    ```
 
-   Sem `--partidas`, na seleção, confira nível, versão e velocidade. Clique **Iniciar** para conectar
+   Sem `--partidas`, clique **Iniciar** no menu principal, confira nível, versão e velocidade
+   e clique **Começar** para conectar
    ao Laya. A primeira conexão pode demorar. O modo normal começa em 1 passo/s.
    O jogo mostra a run, as decisões e o resultado; Repetir cria uma nova sessão.
    Comandos completos sem ativar o venv, para uma partida normal no mapa 15×15:
@@ -85,7 +86,13 @@ ambiente por cima do Python global.
   aparecem na seleção. Só v000 é fornecida; não há treino na v0.1.
 - `runs/Laya_AAAA-MM-DD_HH-MM[_NN]`: metadados, lista de comidas e runs JSON.
   Com `LAYA_HOME`, ambas as pastas ficam nessa raiz; sem ela, no diretório atual.
-- F11: tela cheia; Tab: painel; Esc: voltar quando não houver tarefa em execução.
+- **Configurações**: resolução (Automática usa o tamanho inicial adaptado ao desktop),
+  janela/tela cheia, limite de FPS, vsync, painel e som. **Aplicar** salva em
+  `config/usuario.json` (em `LAYA_HOME`, se definido) e aplica as preferências.
+  Vsync depende do suporte do driver. **Voltar** descarta alterações não aplicadas.
+- F11: tela cheia; Tab: painel. Esc: configuração da partida ou preferências →
+  menu principal; no jogo, volta à seleção quando não houver tarefa em execução.
+  No menu principal, Esc mantém a janela aberta; use **Sair** para fechar.
 - Caixa de passos/s e botões −1/+1: velocidade; automático: próxima partida
   sem intervenção. No modo normal o resultado aparece entre as runs.
 - Treinar fica desabilitado, previsto para v0.2.
