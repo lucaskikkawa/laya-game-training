@@ -33,7 +33,8 @@ def test_api_choice_e_dispositivo(monkeypatch, cuda, force_cpu):
         return {"answers": {"move": {"probabilities": {"straight": .8, "left": .1, "right": .1},
                                        "choice": "straight", "confidence": .72}}}
     agente = SimpleNamespace(system_one=system_one, dtype="fp32")
-    def load(model, device):
+    def load(model, device, **kwargs):
+        assert kwargs == ({"backend": "eager", "compile": False} if device == "cpu" else {})
         chamadas.append((model, device))
         agente.device = device
         return agente
@@ -78,7 +79,7 @@ def test_modelo_local_fp16_e_fallback_real(monkeypatch, tmp_path):
     pasta.mkdir(parents=True)
     chamadas = []
     agente = SimpleNamespace(device="cuda:0", dtype="fp32")
-    def load(origem, device):
+    def load(origem, device, **kwargs):
         chamadas.append((origem, device))
         return agente
     cuda = SimpleNamespace(is_available=lambda: True, get_device_name=lambda d: "GTX teste")

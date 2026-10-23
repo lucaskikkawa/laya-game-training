@@ -5,7 +5,7 @@ import math
 from time import perf_counter
 import pygame
 from nucleo.config import versoes
-from nucleo.laya import Laya
+from nucleo.laya_processo import LayaProcesso
 from .regras import NIVEIS, NOMES_DIRECAO
 from .sessao import Sessao
 from .sons import Sons
@@ -41,6 +41,7 @@ class Aplicativo:
         self.painel = True
         self.cheia = False
         self.rodando = True
+        self._fechado = False
         self.botoes = []
         self.campos = {}
         self.foco = None
@@ -90,7 +91,7 @@ class Aplicativo:
         self.futuro = self.pool.submit(funcao)
 
     def iniciar(self):
-        if self.futuro:
+        if self._fechado or self.futuro:
             return
         try:
             quantidade = int(self.partidas)
@@ -102,7 +103,9 @@ class Aplicativo:
             return
         self.erro = ""
         try:
-            self.sessao = Sessao(self.decisor_injetado or Laya(self.versao, self.args.cpu),
+            if self.sessao and isinstance(self.sessao.decisor, LayaProcesso):
+                self.sessao.decisor.fechar()
+            self.sessao = Sessao(self.decisor_injetado or LayaProcesso(self.versao, self.args.cpu),
                                  self.nivel, quantidade, self.versao, pasta=self.pasta_runs, modo=self.modo)
         except Exception as exc:
             self.erro = f"Não foi possível criar a sessão: {exc}"
@@ -162,6 +165,8 @@ class Aplicativo:
                 self.sessao.interromper(exc)
 
     def atualizar(self, dt):
+        if self._fechado:
+            return
         self._coletar()
         if self.registro:
             for acao, alvo in self.registro["probabilidades"].items():
@@ -473,8 +478,17 @@ class Aplicativo:
             self.fechar()
 
     def fechar(self):
-        # A escrita fica com uma única thread; terminar a inferência antes do checkpoint.
-        self.pool.shutdown(wait=True, cancel_futures=True)
-        if self.sessao and not self.sessao.concluida:
-            self.sessao.interromper()
-        pygame.quit()
+        if self._fechado:
+            return
+        self._fechado = True
+        self.rodando = False
+        try:
+            if self.sessao and isinstance(self.sessao.decisor, LayaProcesso):
+                self.sessao.decisor.fechar()
+            # recv() já foi desbloqueado; preservar a única thread de escrita
+            # antes de salvar o checkpoint da sessão.
+            self.pool.shutdown(wait=True, cancel_futures=True)
+            if self.sessao and not self.sessao.concluida:
+                self.sessao.interromper()
+        finally:
+            pygame.quit()

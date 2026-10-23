@@ -1,5 +1,6 @@
 """Runs pareadas e auditoria JSON; nenhuma dependência de modelo ou interface."""
 from datetime import datetime
+from concurrent.futures import CancelledError
 import gzip
 import json
 import subprocess
@@ -152,6 +153,9 @@ class Sessao:
             raise RuntimeError("Inicie uma run antes de jogar")
         try:
             return self._passo()
+        except CancelledError:
+            self.interromper()
+            raise
         except Exception as exc:
             self.interromper(exc)
             raise

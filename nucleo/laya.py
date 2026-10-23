@@ -1,5 +1,6 @@
 """Adaptador da API laya 0.4.13 (Agent/load/system_one). Imports preguiçosos."""
 import math
+import os
 from time import perf_counter
 from .config import modelo
 from .contratos import Decisao, Opcao
@@ -20,14 +21,19 @@ class Laya:
             return
         inicio = perf_counter()
         origem = modelo(self.versao)
+        if self.cpu:
+            os.environ["TORCHDYNAMO_DISABLE"] = "1"
         import torch
-        import laya
         self._torch = torch
         device = "cuda" if not self.cpu and torch.cuda.is_available() else "cpu"
+        if device == "cpu":
+            os.environ["TORCHDYNAMO_DISABLE"] = "1"
+        import laya
         # load já trata falha de alocação CUDA com fallback CPU.
         # load retorna um Agent. Router faz seleção de idioma/checkpoint e não é
         # necessário aqui: cada run deve usar exatamente a versão selecionada.
-        self.agent = laya.load(origem, device=device)
+        opcoes = {"backend": "eager", "compile": False} if device == "cpu" else {}
+        self.agent = laya.load(origem, device=device, **opcoes)
         self.dispositivo = str(self.agent.device)
         if self.dispositivo.startswith("cuda"):
             # Agent usa autocast; preservar pesos fp32 é necessário ao fallback CPU.
