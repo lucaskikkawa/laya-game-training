@@ -1,8 +1,10 @@
-"""BFS com simulação do corpo e teste do rabo; desvios sem colisão."""
+"""BFS com teste do rabo e transição para um ciclo de segurança."""
 from collections import deque
 from heapq import heappop, heappush
 from itertools import count
-from .regras import ACOES, Jogo, adjacentes, caminho_bfs, alcanca_livre_no_prazo
+from functools import lru_cache
+from time import perf_counter
+from .regras import ACOES, Jogo, adjacentes, caminho_bfs, alcanca_livre_no_prazo, metricas_espaco
 
 
 def simular(corpo, rota, comida):
@@ -41,13 +43,35 @@ def alongar(rota, bloqueadas, n, limite=None):
     return rota[1:]
 
 
+@lru_cache(maxsize=None)
+def ciclo_por_nivel(n):
+    """Ciclo imutável, completo se par; exclui (n-1, 0) se ímpar."""
+    largura = n if n % 2 == 0 else n - 1
+    ciclo = [(0, 0)]
+    for x in range(largura):
+        ys = range(1, n) if x % 2 == 0 else range(n - 1, 0, -1)
+        ciclo.extend((x, y) for y in ys)
+    ciclo.extend((x, 0) for x in range(largura - 1, 0, -1))
+    if n % 2:
+        # Acrescenta pares da última coluna por desvios de duas arestas.
+        for y in range(2, n, 2):
+            i = ciclo.index((n - 2, y))
+            ciclo[i + 1:i + 1] = [(n - 1, y), (n - 1, y - 1)]
+    return tuple(ciclo)
+
+
 class Algoritmo:
     def __init__(self):
         self.estrategia = "BFS e conectividade do espaço livre"
         self._n = None
+        self.modo = "bfs"
+        self.motivo_seguranca = None
+        self._alinhando = None
 
     def configurar(self, n):
         self._n = n
+        self.ciclo = ciclo_por_nivel(n)
+        self.ordem = {p: i for i, p in enumerate(self.ciclo)}
         self._todas = (1 << (n*n)) - 1
         self._esquerda = sum(1 << (y*n) for y in range(n))
         self._direita = self._esquerda << (n-1)
@@ -62,6 +86,7 @@ class Algoritmo:
         self._comida = None
         self._rota = deque()
         self._esperado = None
+        self._alinhando = None
 
     def expandir(self, bits):
         return (((bits & self._nao_direita) << 1) |
@@ -194,7 +219,7 @@ class Algoritmo:
                 -(risco + becos + gargalos) * self._n*self._n,
                 -len(rota) - 2 * self.concavidade(ocupadas))
 
-    def reparar(self, corpo, rota, comida, meta, limite, prazo):
+    def reparar(self, corpo, rota, comida, meta, limite, prazo, deadline=None):
         valor = self.pontuar(corpo, rota, comida, meta, limite)
         if valor is None:
             return None
@@ -204,6 +229,8 @@ class Algoritmo:
             pontos = [corpo[0]] + rota
             melhor = None
             for i, (a, b) in enumerate(zip(pontos, pontos[1:])):
+                if deadline is not None and perf_counter() >= deadline:
+                    return rota if valor > valor_inicial else None
                 dx, dy = b[0]-a[0], b[1]-a[1]
                 for sx, sy in ((-dy,dx),(dy,-dx)):
                     c,d = (a[0]+sx,a[1]+sy),(b[0]+sx,b[1]+sy)
@@ -211,6 +238,8 @@ class Algoritmo:
                         continue
                     nova = rota[:i] + [c,d] + rota[i:]
                     v = self.pontuar(corpo,nova,comida,meta,limite)
+                    if v and v[0]:
+                        return nova
                     if v and (v[0] or v[1] >= valor[1]) and (melhor is None or v > melhor[0]):
                         melhor = v,nova,c,d
             if melhor is None:
@@ -473,31 +502,198 @@ class Algoritmo:
                 return alternativa
         return melhor[1] if melhor else []
 
+    def alinhado(self, corpo):
+        """Ordem circular do rabo à cabeça, admitindo lacunas de atalhos."""
+        if any(p not in self.ordem for p in corpo):
+            return False
+        return sum((self.ordem[a] - self.ordem[b]) % len(self.ciclo)
+                   for a, b in zip(corpo, corpo[1:])) < len(self.ciclo)
+
+    def passo_ordenado(self, corpo, destino, comida):
+        if (not self.alinhado(corpo) or destino not in self.ordem
+                or destino not in self._bits
+                or abs(destino[0] - corpo[0][0]) + abs(destino[1] - corpo[0][1]) != 1):
+            return False
+        tamanho = len(self.ciclo)
+        cabeca = self.ordem[corpo[0]]
+        avanco = (self.ordem[destino] - cabeca) % tamanho
+        rabo = (self.ordem[corpo[-1]] - cabeca) % tamanho
+        # Reserva uma casa além da necessária ao crescimento. O sucessor
+        # pode usar a última folga; atalhos nunca consomem essa reserva.
+        folga = 1 + (destino == comida) + (avanco > 1)
+        if not 0 < avanco <= rabo - folga:
+            return False
+        if comida in self.ordem:
+            distancia = (self.ordem[comida] - cabeca) % tamanho
+            if avanco > distancia:
+                return False
+        futuro = simular(corpo, [destino], comida)
+        return futuro is not None and self.alinhado(futuro)
+
+    def rota_ordenada(self, corpo, rota, comida):
+        for p in rota:
+            if not self.passo_ordenado(corpo, p, comida):
+                return False
+            corpo = simular(corpo, [p], comida)
+        return True
+
+    def caminho_ordenado(self, corpo, comida, prazo):
+        """BFS no grafo de atalhos: só avança entre cabeça, comida e rabo."""
+        if not self.alinhado(corpo) or comida not in self.ordem:
+            return None
+        inicio = corpo[0]
+        tamanho = len(self.ciclo)
+        indice = self.ordem[inicio]
+        distancia = lambda p: (self.ordem[p] - indice) % tamanho
+        teto = min(distancia(comida), distancia(corpo[-1]) - 3)
+        ocupadas = set(corpo[1:])
+        fila = deque([inicio])
+        pais = {inicio: None}
+        while fila:
+            p = fila.popleft()
+            if p == comida:
+                rota = []
+                while pais[p] is not None:
+                    rota.append(p)
+                    p = pais[p]
+                rota.reverse()
+                return rota if len(rota) <= prazo else None
+            for q in adjacentes(p, self._n):
+                if (q in self.ordem and q not in pais and q not in ocupadas
+                        and distancia(p) < distancia(q) <= teto):
+                    pais[q] = p
+                    fila.append(q)
+        return None
+
+    def planejar_rapido(self, jogo, ordenar=False):
+        """BFS temporal e seis aproximações estáticas; sem busca exponencial."""
+        corpo, comida = jogo.corpo, jogo.comida
+        prazo = jogo.nivel.limite - jogo.sem_comer
+        melhor = None
+        rotas = [self.caminho_ordenado(corpo, comida, prazo) if ordenar
+                 else self.caminho(corpo, comida, prazo)]
+        for peso, contato in ((4, 3), (16, 3), (40, 3), (16, 0), (4, 0), (40, 0)):
+            rotas.append(self.ponderado(corpo, comida, peso, contato, prazo))
+        for rota in rotas:
+            if not rota or (ordenar and not self.rota_ordenada(corpo, rota, comida)):
+                continue
+            valor = self.pontuar(corpo, rota, comida, jogo.nivel.meta, jogo.nivel.limite)
+            if valor and (melhor is None or valor > melhor[0]):
+                melhor = valor, rota
+        if melhor and not melhor[0][0] and not ordenar:
+            reparada = self.reparar(corpo, melhor[1], comida, jogo.nivel.meta,
+                                    jogo.nivel.limite, prazo, perf_counter() + 0.015)
+            if reparada:
+                melhor = self.pontuar(corpo, reparada, comida, jogo.nivel.meta, jogo.nivel.limite), reparada
+        return melhor[1] if melhor else []
+
+    def caminho_rabo(self, corpo, comida):
+        """Prefere aproximar o rabo avançando na ordem para desfazer desalinho."""
+        inicio, alvo = corpo[0], corpo[-1]
+        if inicio in self.ordem and alvo in self.ordem:
+            indice = self.ordem[inicio]
+            distancia = lambda p: (self.ordem[p] - indice) % len(self.ciclo)
+            teto = distancia(alvo)
+            bloqueadas = set(corpo[1:-1]) | {comida}
+            fila = deque([inicio])
+            pais = {inicio: None}
+            while fila:
+                p = fila.popleft()
+                if p == alvo:
+                    rota = []
+                    while pais[p] is not None:
+                        rota.append(p)
+                        p = pais[p]
+                    return rota[::-1]
+                for q in adjacentes(p, self._n):
+                    if (q in self.ordem and q not in pais and q not in bloqueadas
+                            and distancia(p) < distancia(q) <= teto):
+                        pais[q] = p
+                        fila.append(q)
+        return caminho_bfs(inicio, alvo, corpo[1:-1] + [comida], self._n)
+
+    def seguir_seguranca(self, jogo):
+        corpo, comida = jogo.corpo, jogo.comida
+        if comida not in self.ordem and self.alinhado(corpo):
+            rota = self.planejar_rapido(jogo)
+            # Só abandona a ordem no último movimento, para a casa omitida.
+            # O teste de escape do planejador exige uma saída após crescer.
+            if rota and self.rota_ordenada(corpo, rota[:-1], comida):
+                self.estrategia = "seguranca_comida_fora_ciclo"
+                return rota[0]
+        if self.alinhado(corpo):
+            # O BFS continua útil como atalho, sempre dentro da ordem.
+            rota = self.planejar_rapido(jogo, ordenar=True)
+            if rota:
+                self.estrategia = "seguranca_atalho_ordenado"
+                return rota[0]
+            sucessor = self.ciclo[(self.ordem[corpo[0]] + 1) % len(self.ciclo)]
+            if self.passo_ordenado(corpo, sucessor, comida):
+                self.estrategia = "seguranca_ciclo"
+                return sucessor
+        rota = self.caminho_rabo(corpo, comida)
+        if rota:
+            self.estrategia = "seguranca_alinhar_seguindo_rabo"
+            return rota[0]
+        self.estrategia = "seguranca_sem_acesso_ao_rabo"
+        return None
+
     def escolher(self, jogo: Jogo) -> str:
         n = jogo.nivel.tamanho
         if self._n != n:
             self.configurar(n)
+        self.modo, self.motivo_seguranca = "bfs", None
         assinatura = (tuple(jogo.corpo), jogo.comida, jogo.direcao)
         if assinatura != self._esperado:
             self._rota.clear()
-        if not self._rota:
-            self._rota.extend(self.planejar(jogo))
-        if self._rota:
+            self._alinhando = None
+        metricas = metricas_espaco(jogo.corpo, n, jogo.comida)
+        grande = len(jogo.corpo) >= jogo.nivel.meta // 2
+        ordenar = grande
+        motivo = None
+        if not metricas["rabo_alcancavel"]:
+            motivo = "rabo_inalcancavel"
+        elif metricas["area_alcancavel"] < len(jogo.corpo):
+            motivo = "area_pequena"
+        elif (ordenar or self._alinhando) and not self.alinhado(jogo.corpo):
+            motivo = self._alinhando or "bfs_sem_caminho_seguro"
+        if self.alinhado(jogo.corpo):
+            self._alinhando = None
+        if not motivo:
+            if self._rota and ordenar and not self.rota_ordenada(jogo.corpo, self._rota, jogo.comida):
+                self._rota.clear()
+            if not self._rota:
+                self._rota.extend(self.planejar_rapido(jogo, ordenar))
+            if not self._rota:
+                motivo = "bfs_sem_caminho_seguro"
+        destino = None
+        if motivo:
+            self.modo, self.motivo_seguranca = "seguranca", motivo
+            if not self.alinhado(jogo.corpo):
+                self._alinhando = motivo
+            self._rota.clear()
+            destino = self.seguir_seguranca(jogo)
+        else:
             destino = self._rota.popleft()
-            for acao in ACOES:
-                if jogo.destino(acao)[0] == destino and jogo.segura(acao):
-                    futuro = simular(jogo.corpo, [destino], jogo.comida)
-                    venceu = destino == jogo.comida and len(futuro) >= jogo.nivel.meta
-                    prazo = (jogo.nivel.limite if destino == jogo.comida
-                             else jogo.nivel.limite - jogo.sem_comer - 1)
-                    if not venceu and not alcanca_livre_no_prazo(futuro, n, prazo):
-                        self._rota.clear()
-                        break
-                    self.estrategia = "seguir_rota_planejada_com_teste_de_escape"
+            self.estrategia = "seguir_rota_planejada_com_teste_de_escape"
+        for acao in ACOES:
+            if destino is not None and jogo.destino(acao)[0] == destino and jogo.segura(acao):
+                futuro = simular(jogo.corpo, [destino], jogo.comida)
+                prazo = jogo.nivel.limite if destino == jogo.comida else jogo.nivel.limite - jogo.sem_comer - 1
+                venceu = destino == jogo.comida and len(futuro) >= jogo.nivel.meta
+                if venceu or alcanca_livre_no_prazo(futuro, n, prazo):
                     self._esperado = (tuple(futuro), jogo.comida, jogo.destino(acao)[1])
                     return acao
+        self._rota.clear()
         self._esperado = None
-        return self.emergencia(jogo)
+        self.modo = "seguranca"
+        self.motivo_seguranca = motivo or "bfs_sem_caminho_seguro"
+        acao = self.emergencia(jogo)
+        if jogo.segura(acao):
+            destino, direcao = jogo.destino(acao)
+            futuro = simular(jogo.corpo, [destino], jogo.comida)
+            self._esperado = (tuple(futuro), jogo.comida, direcao)
+        return acao
 
     def emergencia(self, jogo: Jogo) -> str:
         n = jogo.nivel.tamanho
@@ -517,6 +713,9 @@ class Algoritmo:
             if not jogo.segura(acao):
                 continue
             p, _ = jogo.destino(acao)
+            if (self.alinhado(corpo) and jogo.comida in self.ordem
+                    and not self.passo_ordenado(corpo, p, jogo.comida)):
+                continue
             bit = self._bits[p]
             cresce = p == jogo.comida
             if cresce and len(corpo) + 1 >= jogo.nivel.meta:

@@ -28,6 +28,8 @@ snapshot com `passo=0` e a auditoria das candidatas consultadas.
 | `distancia_bfs_comida` | Distância estática atual, ou null se não houver caminho/comida |
 | `rabo_alcancavel` | Há caminho estático até o rabo, permitindo apenas ele como destino ocupado |
 | `escolha` | Ação relativa: straight, left ou right |
+| `modo` | `bfs` ou `seguranca`, decisão do algoritmo antes do movimento |
+| `motivo_seguranca` | `bfs_sem_caminho_seguro`, `area_pequena`, `rabo_inalcancavel`; null em modo bfs |
 | `estrategia`, `motivo` | Estratégia/motivo registrado pelo decisor |
 | `ideal_bfs_ao_aparecer` | BFS original usado para pontuação, ou null |
 | `latencia_ms` | Tempo de decisão |
@@ -45,6 +47,11 @@ A partida independente do algoritmo pode ter corpo, comidas efetivas e duração
 diferentes, apesar de começar com a mesma lista. `estrategia`/`motivo` do Laya
 identificam a decisão do modelo, sem atribuir a ele uma explicação que não
 forneceu; `estrategia_ideal` descreve a estratégia do oráculo naquele estado.
+`modo` e `motivo_seguranca` na run do Laya descrevem o oráculo que sugeriu
+`jogada_ideal`; não indicam que o modelo seguiu essa ação. Na run independente
+eles descrevem a decisão executada pelo algoritmo. O motivo segue a prioridade
+rabo inalcançável, área pequena e BFS sem caminho seguro; o motivo da transição
+pode persistir até o alinhamento do corpo, conforme `ALGORITMO.md`.
 Na run independente, `estrategia` e `motivo` recebem a estratégia informada pelo
 algoritmo, sem alterar suas decisões. Colisões também contam como movimento e
 possuem uma linha; a cabeça no registro é a posição anterior à tentativa.
@@ -68,7 +75,19 @@ Se existem casas válidas, mas acabam as candidatas, termina com `lista_esgotada
 `motivo_termino` é `vitoria`, `corpo`, `parede`, `fome`, `lista_esgotada`,
 `sem_comida_valida` ou `erro`. `snapshot_final` guarda corpo, cabeça, direção,
 comida/índice, fome, prazo, total de passos e tabuleiro em texto. `resumo` inclui
-pontos, passos, gomos, vitória, morte e comidas consumidas. O campo legado
+pontos, passos, gomos, vitória, morte e comidas consumidas. Inclui ainda
+`passos_seguranca_por_motivo`, com as três chaves sempre presentes (zero
+quando não houver ocorrências), por exemplo:
+
+```json
+{"bfs_sem_caminho_seguro": 4, "area_pequena": 2, "rabo_inalcancavel": 0}
+```
+
+Cada linha em segurança incrementa só o seu motivo; a soma é o total de passos
+em segurança. Na run do Laya essa contagem se refere ao oráculo. Os contadores
+também são persistidos em runs parciais/com erro e nos resumos da comparação.
+O identificador `snake-v0.2` é a versão do formato de arquivo, independente da
+versão do jogo: o algoritmo híbrido integra a v0.1. O campo legado
 `resumo.morte` conserva `limite_sem_comer`, normalizado para `fome` no término.
 Interrupções produzem `laya_parcial.json` e fecham o gzip, inclusive sem movimentos;
 exceções de decisão (Laya ou oráculo local) fecham e salvam a run parcial na

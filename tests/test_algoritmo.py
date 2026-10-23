@@ -213,3 +213,169 @@ def test_emergencia_recusa_bolsao_com_prazo_insuficiente():
     algoritmo = Algoritmo()
     assert g.segura('left')  # (0,0): único passo seguinte seria corpo bloqueado
     assert algoritmo.emergencia(g) == 'right'
+
+
+@pytest.mark.parametrize('nivel', (15, 20, 25))
+def test_ciclo_precalculado_cobre_tabuleiro_e_fecha(nivel):
+    from jogos.snake.algoritmo import ciclo_por_nivel
+    ciclo = ciclo_por_nivel(nivel)
+    assert ciclo_por_nivel(nivel) is ciclo
+    assert len(ciclo) == len(set(ciclo)) == nivel * nivel - nivel % 2
+    tabuleiro = {(x, y) for x in range(nivel) for y in range(nivel)}
+    assert tabuleiro - set(ciclo) == ({(nivel - 1, 0)} if nivel % 2 else set())
+    assert set(ciclo) <= tabuleiro
+    assert all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
+               for a, b in zip(ciclo, ciclo[1:] + ciclo[:1]))
+
+
+def test_gatilho_bfs_sem_rota_e_retorno_ao_bfs(monkeypatch):
+    g = Jogo(20, [(12, 10), (0, 0)])
+    a = Algoritmo()
+    with monkeypatch.context() as patch:
+        patch.setattr(a, 'planejar_rapido', lambda *args, **kwargs: [])
+        acao = a.escolher(g)
+    assert g.segura(acao)
+    assert (a.modo, a.motivo_seguranca) == ('seguranca', 'bfs_sem_caminho_seguro')
+    g.passo(acao)
+    a.escolher(g)
+    assert (a.modo, a.motivo_seguranca) == ('bfs', None)
+
+
+@pytest.mark.parametrize('corpo,motivo', [
+    ([(0, 0), (1, 0), (1, 1), (0, 1)], 'area_pequena'),
+    ([(1, 1), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2),
+      (0, 2), (0, 1), (0, 0)], 'rabo_inalcancavel'),
+])
+def test_gatilhos_reais_de_area_e_rabo(corpo, motivo):
+    g = Jogo(15, [(0, 3)])
+    g.corpo, g.direcao = corpo, 2
+    a = Algoritmo()
+    acao = a.escolher(g)
+    if any(g.segura(acao) for acao in ACOES):
+        assert g.segura(acao)
+    assert a.modo == 'seguranca' and a.motivo_seguranca == motivo
+
+
+def jogo_no_ciclo(nivel=20, indice=100):
+    from jogos.snake.regras import DIRECOES
+    a = Algoritmo()
+    a.configurar(nivel)
+    g = Jogo(nivel, [a.ciclo[(indice + 60) % len(a.ciclo)], (0, 0)])
+    tamanho = g.nivel.meta // 2
+    g.corpo = [a.ciclo[(indice - i) % len(a.ciclo)] for i in range(tamanho)]
+    g.direcao = DIRECOES.index((g.corpo[0][0] - g.corpo[1][0],
+                               g.corpo[0][1] - g.corpo[1][1]))
+    return g, a
+
+
+@pytest.mark.parametrize('nivel', (15, 20, 25))
+def test_bfs_grande_respeita_ordem_inclusive_ao_crescer(nivel):
+    g, a = jogo_no_ciclo(nivel)
+    for _ in range(g.nivel.limite):
+        antes = list(g.corpo)
+        comida = g.comida
+        acao = a.escolher(g)
+        assert g.segura(acao)
+        assert a.passo_ordenado(antes, g.destino(acao)[0], comida)
+        g.passo(acao)
+        assert a.alinhado(g.corpo)
+        if g.comidas_consumidas:
+            break
+    assert g.comidas_consumidas == 1 and not g.fim
+
+
+def test_atalhos_nao_pulam_comida_nem_rabo_e_reservam_folga():
+    g, a = jogo_no_ciclo()
+    cabeca = g.corpo[0]
+    from jogos.snake.regras import adjacentes
+    atalho = next(p for p in adjacentes(cabeca, 20)
+                  if 1 < (a.ordem[p] - a.ordem[cabeca]) % len(a.ciclo) < 100)
+    sucessor = a.ciclo[(a.ordem[cabeca] + 1) % len(a.ciclo)]
+    assert a.passo_ordenado(g.corpo, atalho, atalho)
+    assert not a.passo_ordenado(g.corpo, atalho, sucessor)
+    assert not a.passo_ordenado(g.corpo, g.corpo[-1], g.comida)
+    # O rabo está duas posições além do atalho: sobra insuficiente para crescer.
+    indice = a.ordem[atalho]
+    apertado = [cabeca, a.ciclo[(indice + 2) % len(a.ciclo)]]
+    assert a.alinhado(apertado)
+    assert not a.passo_ordenado(apertado, atalho, atalho)
+
+
+def test_seguranca_alinhada_segue_ciclo_quando_nao_ha_atalho(monkeypatch):
+    g, a = jogo_no_ciclo()
+    monkeypatch.setattr(a, 'planejar_rapido', lambda *args, **kwargs: [])
+    acao = a.escolher(g)
+    assert a.modo == 'seguranca' and a.estrategia == 'seguranca_ciclo'
+    assert g.destino(acao)[0] == a.ciclo[101]
+
+
+def test_transicao_desalinhada_segue_rabo_ate_alinhar():
+    g = Jogo(20, [(15, 15)])
+    g.corpo = ([(x, 0) for x in range(19, -1, -1)]
+               + [(0, y) for y in range(1, 20)] + [(x, 19) for x in range(1, 12)])
+    g.direcao = 1
+    a = Algoritmo()
+    a.configurar(20)
+    assert not a.alinhado(g.corpo)
+    for _ in range(12):
+        from jogos.snake.regras import caminho_bfs
+        rabo = caminho_bfs(g.corpo[0], g.corpo[-1], g.corpo[1:-1] + [g.comida], 20)
+        acao = a.escolher(g)
+        assert a.modo == 'seguranca'
+        assert a.estrategia == 'seguranca_alinhar_seguindo_rabo'
+        assert g.destino(acao)[0] == rabo[0]
+        g.passo(acao)
+        if a.alinhado(g.corpo):
+            break
+    assert not g.fim
+
+
+@pytest.mark.parametrize('nivel', (15, 25))
+def test_comida_na_casa_omitida_tem_escape_e_reentrada(nivel):
+    g, a = jogo_no_ciclo(nivel)
+    # Cabeça na borda superior, ao lado da casa omitida.
+    indice = a.ordem[(nivel - 1, 1)]
+    tamanho = g.nivel.meta // 2
+    g.corpo = [a.ciclo[(indice - i) % len(a.ciclo)] for i in range(tamanho)]
+    g.direcao = 0
+    g.comida = (nivel - 1, 0)
+    acao = a.escolher(g)
+    assert g.segura(acao) and g.destino(acao)[0] == g.comida
+    g.passo(acao)
+    assert g.comidas_consumidas == 1
+    if not g.fim:
+        acao = a.escolher(g)
+        assert g.segura(acao) and g.destino(acao)[0] in a.ordem
+
+
+def test_transicao_solta_desalinho_no_rabo_e_preserva_ordem():
+    from jogos.snake.regras import DIRECOES
+    g, a = jogo_no_ciclo()
+    g.corpo = list(reversed(a.ciclo[60:100])) + [
+        (3, 18), (3, 19), (2, 19), (1, 19), (1, 18)]
+    g.direcao = DIRECOES.index((g.corpo[0][0] - g.corpo[1][0],
+                               g.corpo[0][1] - g.corpo[1][1]))
+    g.comida = (15, 15)
+    assert not a.alinhado(g.corpo)
+    acao = a.escolher(g)
+    assert a.estrategia == 'seguranca_alinhar_seguindo_rabo'
+    assert a.modo == 'seguranca' and g.segura(acao)
+    g.passo(acao)
+    assert a.alinhado(g.corpo)
+    antes = list(g.corpo)
+    acao = a.escolher(g)
+    assert a.passo_ordenado(antes, g.destino(acao)[0], g.comida)
+
+
+@pytest.mark.parametrize('nivel', (15, 25))
+def test_comida_omitida_nao_e_consumida_sem_saida(nivel):
+    g, a = jogo_no_ciclo(nivel)
+    indice = a.ordem[(nivel - 2, 0)]
+    g.corpo = [a.ciclo[(indice - i) % len(a.ciclo)]
+               for i in range(g.nivel.meta // 2)]
+    g.direcao = 0
+    g.comida = (nivel - 1, 0)
+    # A outra saída da casa omitida está ocupada pelo corpo, longe do rabo.
+    acao = a.escolher(g)
+    assert g.segura(acao) and g.destino(acao)[0] != g.comida
+    assert a.modo == 'seguranca'

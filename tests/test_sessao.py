@@ -295,7 +295,12 @@ def test_reconstroi_runs_inteiras_e_metricas_sem_consultar_o_algoritmo(tmp_path)
             assert r['pontos_ganhos'] == replay.passo(r['escolha'])
             assert r['pontos'] == replay.pontos
         assert replay.fim
-        assert dados['resumo'] == replay.resumo()
+        assert {k: dados['resumo'][k] for k in replay.resumo()} == replay.resumo()
+        motivos = ('bfs_sem_caminho_seguro', 'area_pequena', 'rabo_inalcancavel')
+        assert dados['resumo']['passos_seguranca_por_motivo'] == {
+            m: sum(r['motivo_seguranca'] == m for r in dados['passos']) for m in motivos}
+        assert all(r['modo'] == ('seguranca' if r['motivo_seguranca'] else 'bfs')
+                   for r in dados['passos'])
         assert dados['snapshot_final']['estado'] == replay.estado()
         assert dados['snapshot_final']['corpo'] == [list(p) for p in replay.corpo]
         assert dados['snapshot_final']['comida'] == (list(replay.comida) if replay.comida else None)
@@ -468,3 +473,40 @@ def test_bfs_nulo_e_escape_pelo_rabo_persistidos(tmp_path, monkeypatch):
         assert r['area_alcancavel'] == 0 and r['rabo_alcancavel'] is True
         assert run['resumo']['pontos'] == 100
         assert run['motivo_termino'] == 'lista_esgotada'
+
+
+def test_modo_seguranca_real_e_contagem_nas_duas_runs(tmp_path, monkeypatch):
+    from jogos.snake import sessao
+    from jogos.snake.regras import Jogo
+
+    def preparar(nivel, comidas):
+        g = Jogo(nivel, comidas)
+        g.corpo = [(0, 0), (1, 0), (1, 1), (0, 1)]
+        g.direcao = 2
+        return g
+
+    monkeypatch.setattr(sessao, 'Jogo', preparar)
+    s = Sessao(MockLaya(), pasta=tmp_path, comidas=[(0, 2)])
+    executar(s)
+    for agente in ('laya', 'algoritmo'):
+        run = ler_run(s.pasta, f'run_0001_{agente}.json')
+        assert run['passos'][0]['modo'] == 'seguranca'
+        assert run['passos'][0]['motivo_seguranca'] == 'area_pequena'
+        assert run['resumo']['passos_seguranca_por_motivo'] == {
+            'bfs_sem_caminho_seguro': 0, 'area_pequena': 1, 'rabo_inalcancavel': 0}
+        assert run['passos'][1]['modo'] == 'bfs'
+        assert run['passos'][1]['motivo_seguranca'] is None
+        comparacao = ler_run(s.pasta, 'run_0001_comparacao.json')
+        assert comparacao['geral'][agente] == run['resumo']
+
+
+def test_contagem_seguranca_preservada_na_run_parcial(tmp_path, monkeypatch):
+    s = Sessao(MockLaya(), pasta=tmp_path, comidas=[(0, 0)])
+    s.iniciar_run()
+    monkeypatch.setattr(s._oraculo, 'planejar_rapido', lambda *args, **kwargs: [])
+    r = s.passo()
+    assert r['modo'] == 'seguranca'
+    s.interromper()
+    run = ler_run(s.pasta, 'run_0001_laya_parcial.json')
+    assert run['resumo']['passos_seguranca_por_motivo'] == {
+        'bfs_sem_caminho_seguro': 1, 'area_pequena': 0, 'rabo_inalcancavel': 0}

@@ -70,10 +70,21 @@ Telas de resultado:
 - Modo rápido: tela de resumo só no fim da sessão.
 
 ## Algoritmo (gabarito, não pode errar)
-- Caminho mais curto até a comida com o teste do rabo: depois de comer, ainda consegue chegar no rabo? Se não, segue o rabo.
+- Híbrido na v0.1 (etapa 3): BFS principal com teste do rabo após crescer e
+  ciclo de segurança pré-calculado por nível. Entra em segurança se faltar
+  caminho seguro, a área livre alcançável for menor que a cobra ou o rabo
+  ficar inalcançável. A partir de metade da meta, o BFS respeita a ordem do
+  ciclo, sem ultrapassar o rabo nem pular comida, reservando folga; segue o
+  rabo durante a transição de um corpo desalinhado.
+- 20x20: ciclo completo. 15x15 e 25x25: ciclo com uma casa omitida, `(n-1, 0)`,
+  com saída validada para comer nela e posterior reentrada; sem garantia
+  total. O limite sem comer permanece 100 no 25x25. Detalhes em
+  `docs/ALGORITMO.md`; a etapa não certifica novamente o QA completo.
+- Cada passo registra `modo` (`bfs`/`seguranca`) e `motivo_seguranca`; os
+  resumos das runs contam os passos em segurança por motivo.
 - O script de QA roda 200 partidas por nível por padrão e exige 100% de vitórias. Qualquer derrota reprova o QA e é registrada para reprodução.
 
-Resultados anteriores à correção única desta rodada: 15x15 **200/200**,
+Resultados históricos anteriores ao híbrido e à correção única: 15x15 **200/200**,
 20x20 **200/200**, 25x25 **198/200**. O 25x25 ainda não satisfaz os 100%.
 Após a correção única, somente as falhas 62 e 128 foram repetidas com as
 mesmas listas: **2/2 vitórias**. Isso não certifica os 200 casos após a alteração.
@@ -160,7 +171,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 
 ## Roadmap
 - v0.1, primeiro passo: Preparação do PC do Lucas: o Boss (único bot com acesso ao PC, sempre com aprovação do Lucas) cria a pasta C:\Users\lucas\laya-games\, faz o clone do repo, cria o venv, instala torch 2.14.1+cu126 (index cu126), transformers 5.20.2, pygame-ce, numpy, atualiza o laya pra 0.4.13, baixa o modelo convaiinnovations/laya (~1 GB) e confirma que o CUDA enxerga a GTX 1650.
-- v0.1: jogo, painel, níveis, algoritmo (QA padrão de 200 partidas/nível, 100%) e runs. O Laya começa sem treino (v000). Medir GPU e passos/s.
+- v0.1: jogo, painel, níveis, algoritmo híbrido com BFS e ciclo de segurança (QA padrão de 200 partidas/nível, 100%) e runs. O Laya começa sem treino (v000). Medir GPU e passos/s.
 - v0.2: treino no PC, calibração (runs de calibração + temperatura), modo comparação e teste de treino no Kaggle.
 - v0.3: tutor via `agy` (relatórios + arquivo de pesos); comparar 3.5 Flash Lite com 3.8 Flash.
 - v0.4: fluxo Kaggle completo.

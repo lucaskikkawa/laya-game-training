@@ -33,6 +33,13 @@ def versao_pacote_laya():
         return None
 
 
+MOTIVOS_SEGURANCA = ("bfs_sem_caminho_seguro", "area_pequena", "rabo_inalcancavel")
+
+
+def contadores_seguranca():
+    return dict.fromkeys(MOTIVOS_SEGURANCA, 0)
+
+
 def escrever_passo(arquivo, registro):
     arquivo.write(json.dumps({k: v for k, v in registro.items() if k != "estado"},
                              ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -107,6 +114,7 @@ class Sessao:
         self.jogo = None
         self._run_ativa = False
         self.registros = []
+        self._seguranca_laya = contadores_seguranca()
         self._oraculo = Algoritmo()
         self.inicio = perf_counter()
         self.metadados = {"commit_codigo": commit_codigo(), "nivel": nivel, "versao_laya": versao,
@@ -141,6 +149,7 @@ class Sessao:
             raise RuntimeError("Finalize a run atual antes de iniciar outra")
         self.jogo = Jogo(self.nivel, self.comidas[self.cursor:])
         self.registros = []
+        self._seguranca_laya = contadores_seguranca()
         self._oraculo = Algoritmo()
         self.inicio_run = perf_counter()
         self._run_ativa = True
@@ -171,10 +180,13 @@ class Sessao:
                          "jogada_ideal": ideal, "concorda": decisao.escolha == ideal,
                          "estrategia": "decisao_modelo", "motivo": "Escolha do Laya a partir do estado e das opções",
                          "estrategia_ideal": self._oraculo.estrategia,
+                         "modo": self._oraculo.modo, "motivo_seguranca": self._oraculo.motivo_seguranca,
                          "latencia_ms": decisao.latencia_ms})
         registro["pontos_ganhos"] = jogo.passo(decisao.escolha)
         registro["pontos"] = jogo.pontos
         escrever_passo(self._arquivo_laya, registro)
+        if registro["motivo_seguranca"] is not None:
+            self._seguranca_laya[registro["motivo_seguranca"]] += 1
         self.registros.append({k: registro[k] for k in ("escolha", "jogada_ideal", "latencia_ms")})
         return registro
 
@@ -188,11 +200,12 @@ class Sessao:
             self._arquivo_laya.close()
             self._arquivo_laya = None
 
-    def _fim_run(self, jogo, motivo=None):
+    def _fim_run(self, jogo, motivo=None, seguranca=None):
         return {"schema": "snake-v0.2", **self.metadados,
                 "motivo_termino": motivo or termino(jogo),
                 "snapshot_final": {**snapshot(jogo, self.cursor), "estado": jogo.estado()},
-                "resumo": jogo.resumo()}
+                "resumo": {**jogo.resumo(), "passos_seguranca_por_motivo":
+                           dict(seguranca if seguranca is not None else self._seguranca_laya)}}
 
     def _auditoria_comidas(self, jogo):
         # Jogo usa índices locais; arquivos usam a lista completa da sessão.
@@ -220,6 +233,7 @@ class Sessao:
         gabarito = Jogo(self.nivel, self.comidas[self.cursor:])
         inicio = perf_counter()
         nome_passos_algoritmo = f"{identificador}_algoritmo.jsonl.gz"
+        seguranca = contadores_seguranca()
         try:
             with gzip.open(self.pasta / nome_passos_algoritmo, "wt", encoding="utf-8", compresslevel=1) as arquivo:
                 algoritmo = Algoritmo()
@@ -229,10 +243,13 @@ class Sessao:
                     latencia = (perf_counter() - inicio_passo) * 1000
                     registro = {**self._registro(gabarito), "escolha": acao,
                                 "estrategia": algoritmo.estrategia, "motivo": algoritmo.estrategia,
+                                "modo": algoritmo.modo, "motivo_seguranca": algoritmo.motivo_seguranca,
                                 "latencia_ms": latencia}
                     registro["pontos_ganhos"] = gabarito.passo(acao)
                     registro["pontos"] = gabarito.pontos
                     escrever_passo(arquivo, registro)
+                    if registro["motivo_seguranca"] is not None:
+                        seguranca[registro["motivo_seguranca"]] += 1
         except Exception as exc:
             self.documento["erro"] = f"{type(exc).__name__}: {exc}"
             self.documento["valida_para_treino"] = False
@@ -240,7 +257,7 @@ class Sessao:
             self.documento["status"] = "erro"
             self._salvar()
             salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
-                **self._fim_run(gabarito, "erro"), **self._auditoria_comidas(gabarito),
+                **self._fim_run(gabarito, "erro", seguranca), **self._auditoria_comidas(gabarito),
                 "status": "erro", "erro": self.documento["erro"],
                 "inicio_lista": self.cursor, "passos": nome_passos_algoritmo})
             raise
@@ -253,10 +270,11 @@ class Sessao:
         salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
             **self._auditoria_comidas(gabarito),
             "inicio_lista": self.cursor, "passos": nome_passos_algoritmo,
-            "status": "concluida", **self._fim_run(gabarito),
+            "status": "concluida", **self._fim_run(gabarito, seguranca=seguranca),
             "segundos": tempo, "passos_por_segundo": gabarito.passos / max(tempo, 1e-9)})
         auditoria_algoritmo = self._auditoria_comidas(gabarito)
-        comparacao = comparar(self.registros, self.jogo.resumo(), gabarito.resumo(),
+        comparacao = comparar(self.registros, laya["resumo"],
+                             self._fim_run(gabarito, seguranca=seguranca)["resumo"],
                              pulos_laya=laya["pulos"], pulos_algoritmo=auditoria_algoritmo["pulos"],
                              comidas_laya=laya["comidas_efetivas"],
                              comidas_algoritmo=auditoria_algoritmo["comidas_efetivas"],
