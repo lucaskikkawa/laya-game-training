@@ -11,6 +11,7 @@ from nucleo.laya_processo import LayaProcesso
 from .regras import NIVEIS, NOMES_DIRECAO
 from .sessao import Sessao
 from .controles import Pausa
+from . import ux
 from .sons import Sons
 
 FUNDO = (9, 18, 36)
@@ -20,6 +21,7 @@ MUTED = (146, 164, 186)
 VERDE = (72, 205, 117)
 VERMELHO = (240, 78, 88)
 AZUL = (76, 155, 234)
+TREINAR = "Treinar · disponível na v0.2"
 TRADUCAO = {"straight": "Reto", "left": "Esquerda", "right": "Direita"}
 
 
@@ -71,8 +73,14 @@ class Aplicativo:
         self.versao = args.versao
         self.versoes = sorted(set(versoes()) | {self.versao})
         self.modo = args.modo
-        self.velocidade = str(args.passos_por_segundo).removesuffix(".0")
-        self.partidas = str(args.partidas)
+        # Limites digitáveis; valores vindos da linha de comando não são alterados.
+        self.entradas = {
+            "partidas": ux.CampoNumerico(args.partidas, 1, 9999, inteiro=True),
+            "velocidade": ux.CampoNumerico(args.passos_por_segundo, .1, 1000, piso_passo=1),
+        }
+        self.pressao = ux.Pressao()
+        self.mouse_logico = (-1, -1)
+        self._mao = False
         self.automatico = args.auto_iniciar or args.partidas > 1
         self.decisor_injetado = decisor
         self.pasta_runs = pasta_runs
@@ -103,6 +111,27 @@ class Aplicativo:
         self.sons = Sons()
         self.status = "Escolha o nível e a versão."
 
+    @property
+    def partidas(self):
+        return self.entradas["partidas"].texto
+
+    @partidas.setter
+    def partidas(self, valor):
+        self.entradas["partidas"].definir(valor)
+
+    @property
+    def velocidade(self):
+        return self.entradas["velocidade"].texto
+
+    @velocidade.setter
+    def velocidade(self, valor):
+        self.entradas["velocidade"].definir(valor)
+
+    @property
+    def editando(self):
+        """True quando um campo de texto está em foco (teclas viram digitação)."""
+        return self.foco in ux.CAMPOS
+
     def fonte(self, tamanho=20, mono=False):
         chave = tamanho, mono
         if chave not in self.fontes:
@@ -114,16 +143,33 @@ class Aplicativo:
 
     def botao(self, titulo, retangulo, acao, ativo=True):
         rect = pygame.Rect(retangulo)
-        pygame.draw.rect(self.canvas, AZUL if ativo else (43, 53, 68), rect, border_radius=8)
+        pressionado = ativo and self.pressao.ativa(acao, perf_counter())
+        hover = ativo and rect.collidepoint(self.mouse_logico)
+        desenho = rect.inflate(-4, -4) if pressionado else rect
+        pygame.draw.rect(self.canvas, ux.cor_botao(AZUL, ativo, hover, pressionado), desenho, border_radius=8)
+        if not ativo:
+            pygame.draw.rect(self.canvas, (62, 74, 92), rect, 1, border_radius=8)
+        if self.foco == acao:
+            pygame.draw.rect(self.canvas, TEXTO, rect.inflate(6, 6), 2, border_radius=10)
         imagem = self.fonte(18).render(titulo, True, TEXTO if ativo else MUTED)
-        self.canvas.blit(imagem, imagem.get_rect(center=rect.center))
+        self.canvas.blit(imagem, imagem.get_rect(center=desenho.center))
         self.botoes.append((rect, acao, ativo))
 
-    def campo(self, nome, valor, rect):
+    def alternador(self, nome, valor, retangulo, acao):
+        self.botao(ux.rotulo_alternador(nome, valor), retangulo, acao)
+
+    def campo(self, nome, rect):
         rect = pygame.Rect(rect)
+        entrada = self.entradas[nome]
+        focado = self.foco == nome
         pygame.draw.rect(self.canvas, CARTAO, rect, border_radius=5)
-        pygame.draw.rect(self.canvas, AZUL if self.foco == nome else MUTED, rect, 1, border_radius=5)
-        self.texto(valor + ("|" if self.foco == nome else ""), rect.x + 10, rect.y + 7)
+        pygame.draw.rect(self.canvas, AZUL if focado else MUTED, rect, 2 if focado else 1, border_radius=5)
+        fonte = self.fonte(20)
+        imagem = fonte.render(entrada.texto, True, TEXTO)
+        self.canvas.blit(imagem, (rect.x + 10, rect.centery - imagem.get_height() // 2))
+        if focado and entrada.cursor_visivel(perf_counter()):
+            x = rect.x + 10 + imagem.get_width() + 2
+            pygame.draw.line(self.canvas, TEXTO, (x, rect.y + 9), (x, rect.bottom - 10), 2)
         self.campos[nome] = rect
 
     def _enviar(self, tarefa, funcao):
@@ -133,6 +179,8 @@ class Aplicativo:
     def iniciar(self):
         if self._fechado or self.futuro:
             return
+        for entrada in self.entradas.values():
+            entrada.confirmar()
         try:
             quantidade = int(self.partidas)
             velocidade = float(self.velocidade)
@@ -151,7 +199,8 @@ class Aplicativo:
             self.erro = f"Não foi possível criar a sessão: {exc}"
             return
         self.estado = "carregando"
-        self.status = "Conectando ao Laya; o primeiro carregamento pode demorar..."
+        self.foco = None
+        self.status = f"Carregando o Laya na {'CPU' if self.args.cpu else 'GPU'}..."
         self._enviar("carregar", lambda: getattr(self.sessao.decisor, "carregar", lambda: None)())
 
     def _nova_run(self):
@@ -231,25 +280,31 @@ class Aplicativo:
         self.texto("Snake", 80, 110, 64, VERDE)
         self.texto("Laya v0.1 · Decisões em tempo real", 84, 188, 28)
         self.texto("Paredes, corpo e o limite sem comer encerram a partida.", 84, 238, 22, MUTED)
+        c1, c2, larg, alt = ux.COLUNA_1, ux.COLUNA_2, ux.LARGURA_ALTERNADOR, ux.ALTURA_LINHA
         n = NIVEIS[self.nivel]
-        self.botao(f"Nível: {n.tamanho} × {n.tamanho}", (84, 310, 245, 48), "nivel")
-        self.texto(f"Vitória: {n.meta} gomos · Limite: {n.limite} passos sem comer", 350, 322)
-        self.botao(f"Laya: {self.versao}", (84, 380, 245, 48), "versao")
-        self.texto("v000 = modelo base, sem treino", 350, 392, 20, MUTED)
-        self.botao(f"Modo: {'Normal' if self.modo == 'normal' else 'Rápido'}", (84, 450, 245, 48), "modo")
-        self.texto("Partidas seguidas", 350, 462)
-        self.campo("partidas", self.partidas, (525, 450, 100, 46))
-        self.botao(f"Automático: {'sim' if self.automatico else 'não'}", (655, 450, 215, 46), "auto")
-        self.controles_velocidade(84, 530)
-        self.botao("Iniciar · Conectar ao Laya", (84, 630, 300, 55), "start")
-        self.botao("Treinar · em breve, v0.2", (410, 630, 270, 55), "treinar", False)
-        self.texto("F11: tela cheia     Tab: mostrar/esconder painel     Esc: voltar", 84, 755, 19, MUTED)
-        self.texto("Dispositivo: " + ("CPU solicitado" if self.args.cpu else "CUDA se disponível, senão CPU"), 84, 705, 19, MUTED)
+        linha = ux.linha_grade
+        # Coluna 1: alternadores e rótulos; coluna 2: campos e textos de apoio.
+        self.alternador("Nível", f"{n.tamanho}x{n.tamanho}", (c1, linha(0), larg, alt), "nivel")
+        self.texto(f"Vitória: {n.meta} gomos · Limite: {n.limite} passos sem comer", c2, linha(0) + 12)
+        self.alternador("Laya", self.versao, (c1, linha(1), larg, alt), "versao")
+        self.texto("v000 = modelo base, sem treino", c2, linha(1) + 12, 20, MUTED)
+        self.alternador("Modo", "Normal" if self.modo == "normal" else "Rápido", (c1, linha(2), larg, alt), "modo")
+        self.alternador("Automático", "sim" if self.automatico else "não", (c1, linha(3), larg, alt), "auto")
+        self.texto("Partidas", c1, linha(4) + 12)
+        self.campo("partidas", (c2, linha(4), 110, alt))
+        self.texto("Passos/s", c1, linha(5) + 12)
+        self.campo("velocidade", (c2, linha(5), 110, alt))
+        self.botao("−1", (c2 + 122, linha(5), 48, alt), "menos")
+        self.botao("+1", (c2 + 180, linha(5), 48, alt), "mais")
+        self.botao("Iniciar · Conectar ao Laya", (c1, linha(6) + 20, larg, 55), "start")
+        self.botao(TREINAR, (c2, linha(6) + 20, 300, 55), "treinar", False)
+        self.texto("Dispositivo: " + ("CPU solicitado" if self.args.cpu else "CUDA se disponível, senão CPU"), c1, 765, 19, MUTED)
+        self.texto("Enter: iniciar     Tab: próximo controle     ← →: mudar opção     F11: tela cheia     Esc: voltar", c1, 800, 19, MUTED)
 
     def controles_velocidade(self, x, y):
         self.texto("Passos/s", x, y + 10, 19)
         self.botao("−1", (x + 105, y, 48, 44), "menos")
-        self.campo("velocidade", self.velocidade, (x + 164, y, 82, 44))
+        self.campo("velocidade", (x + 164, y, 82, 44))
         self.botao("+1", (x + 257, y, 48, 44), "mais")
 
     def desenhar_tabuleiro(self):
@@ -398,9 +453,27 @@ class Aplicativo:
             self.botao("Próxima partida", (90, 680, 240, 50), "proxima")
         self.botao("Repetir · Nova sessão", (360, 680, 240, 50), "retry")
         self.botao("Seleção", (630, 680, 180, 50), "selecao")
-        self.botao("Treinar · em breve, v0.2", (845, 680, 300, 50), "treinar", False)
+        self.botao(TREINAR, (845, 680, 300, 50), "treinar", False)
+
+    def _atualizar_ponteiro(self):
+        """Posição do mouse no canvas (para hover) e cursor de mãozinha sobre botões ativos."""
+        destino = getattr(self, "destino", None) or self.tela.get_rect()
+        try:
+            self.mouse_logico = mouse_para_logico(pygame.mouse.get_pos(), tuple(destino))
+        except ZeroDivisionError:
+            self.mouse_logico = (-1, -1)
+
+    def _cursor(self):
+        mao = any(ativo and r.collidepoint(self.mouse_logico) for r, _, ativo in self.botoes)
+        if mao != self._mao:
+            self._mao = mao
+            try:
+                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND if mao else pygame.SYSTEM_CURSOR_ARROW)
+            except pygame.error:
+                pass
 
     def desenhar(self):
+        self._atualizar_ponteiro()
         self.canvas.fill(FUNDO)
         self.botoes.clear()
         self.campos.clear()
@@ -424,13 +497,14 @@ class Aplicativo:
                 self.desenhar_painel()
             self.controles_velocidade(30, 805)
             self.botao("Repetir", (365, 805, 100, 44), "retry", not self.futuro)
-            self.botao(f"Auto: {'sim' if self.automatico else 'não'}", (485, 805, 150, 44), "auto")
-            self.botao("Treinar · v0.2", (650, 805, 130, 44), "treinar", False)
+            self.alternador("Automático", "sim" if self.automatico else "não", (485, 805, 210, 44), "auto")
+            self.botao(TREINAR, (710, 805, 270, 44), "treinar", False)
         if self.erro:
             # Quebrar mensagens de exceção para caberem na janela.
             for i in range(0, min(len(self.erro), 330), 110):
                 self.texto(self.erro[i:i + 110], 30, 740 + (i // 110) * 24, 19, VERMELHO)
         self.pausa.desenhar(self)
+        self._cursor()
         janela = self.tela.get_rect()
         escala = min(janela.width / 1280, janela.height / 860)
         tamanho = (max(1, int(1280 * escala)), max(1, int(860 * escala)))
@@ -440,22 +514,19 @@ class Aplicativo:
         self.tela.blit(pygame.transform.smoothscale(self.canvas, tamanho), self.destino)
         pygame.display.flip()
 
-    def acionar(self, acao):
+    def acionar(self, acao, passo=1):
+        """`passo` = -1 volta a opção anterior dos alternadores (clique direito / seta)."""
         if acao == "nivel":
-            niveis = list(NIVEIS)
-            self.nivel = niveis[(niveis.index(self.nivel) + 1) % len(niveis)]
+            self.nivel = ux.ciclar(NIVEIS, self.nivel, passo)
         elif acao == "versao":
-            self.versao = self.versoes[(self.versoes.index(self.versao) + 1) % len(self.versoes)]
+            self.versao = ux.ciclar(self.versoes, self.versao, passo)
         elif acao == "modo":
             self.modo = "rapido" if self.modo == "normal" else "normal"
             self.velocidade = "5" if self.modo == "rapido" else "1"
         elif acao == "auto":
             self.automatico = not self.automatico
         elif acao in ("mais", "menos"):
-            try:
-                self.velocidade = str(max(1, float(self.velocidade) + (1 if acao == "mais" else -1))).removesuffix(".0")
-            except ValueError:
-                self.velocidade = "1"
+            self.entradas["velocidade"].mudar(1 if acao == "mais" else -1, perf_counter())
         elif acao == "start":
             self.iniciar()
         elif acao == "proxima":
@@ -466,8 +537,73 @@ class Aplicativo:
             self.estado = "selecao"
             self.pausa.ativa = False
             self.erro = ""
+            self.foco = None
             if acao == "retry":
                 self.iniciar()
+
+    def _focar(self, nome):
+        """Muda o foco; sair de um campo confirma (valor inválido volta ao último válido)."""
+        if self.foco in ux.CAMPOS and self.foco != nome:
+            self.entradas[self.foco].confirmar()
+        self.foco = nome
+        if nome in ux.CAMPOS:
+            self.entradas[nome].ultima_digitacao = perf_counter()
+
+    def _tecla(self, event):
+        tecla = event.key
+        if tecla in (pygame.K_p, pygame.K_SPACE) and not self.editando:
+            self.pausa.alternar(self.estado)
+        elif tecla == pygame.K_F11:
+            self.cheia = not self.cheia
+            self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
+        elif tecla == pygame.K_TAB:
+            if self.estado == "selecao":
+                recuar = getattr(event, "mod", 0) & pygame.KMOD_SHIFT
+                self._focar(ux.proximo_foco(ux.ORDEM_FOCO, self.foco, -1 if recuar else 1))
+            else:
+                self.painel = not self.painel
+        elif tecla == pygame.K_ESCAPE:
+            if self.editando:
+                self._focar(None)
+            elif not self.futuro:
+                self.acionar("selecao")
+        elif tecla in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if self.editando:
+                self.entradas[self.foco].confirmar()
+            if self.estado == "selecao":
+                self.acionar("start")
+            else:
+                self._focar(None)
+        elif tecla in (pygame.K_RIGHT, pygame.K_UP, pygame.K_LEFT, pygame.K_DOWN):
+            passo = 1 if tecla in (pygame.K_RIGHT, pygame.K_UP) else -1
+            if self.foco in ux.ALTERNADORES:
+                self.acionar(self.foco, passo)
+            elif self.editando:
+                self.entradas[self.foco].mudar(passo, perf_counter())
+        elif self.editando:
+            entrada = self.entradas[self.foco]
+            if tecla == pygame.K_BACKSPACE:
+                entrada.apagar(perf_counter())
+            elif event.unicode:
+                entrada.digitar(event.unicode, perf_counter())
+
+    def _clique(self, event):
+        pos = mouse_para_logico(event.pos, tuple(getattr(self, "destino", self.tela.get_rect())))
+        if event.button == 1:
+            campo = next((nome for nome, r in self.campos.items() if r.collidepoint(pos)), None)
+            if campo:
+                self._focar(campo)
+                return
+        for r, acao, ativo in self.botoes:
+            if ativo and r.collidepoint(pos):
+                if event.button == 3 and acao not in ux.ALTERNADORES:
+                    return
+                self.pressao.pressionar(acao, perf_counter())
+                self._focar(acao if acao in ux.ALTERNADORES else None)
+                self.acionar(acao, -1 if event.button == 3 else 1)
+                return
+        if event.button == 1:
+            self._focar(None)
 
     def evento(self, event):
         if event.type == pygame.QUIT:
@@ -475,38 +611,9 @@ class Aplicativo:
         elif event.type == pygame.VIDEORESIZE and not self.cheia:
             self.tela = pygame.display.set_mode((max(1, event.w), max(1, event.h)), pygame.RESIZABLE)
         elif event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_p, pygame.K_SPACE) and not self.foco:
-                self.pausa.alternar(self.estado)
-            elif event.key == pygame.K_F11:
-                self.cheia = not self.cheia
-                self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
-            elif event.key == pygame.K_TAB:
-                self.painel = not self.painel
-            elif event.key == pygame.K_ESCAPE:
-                if self.foco:
-                    self.foco = None
-                elif not self.futuro:
-                    self.acionar("selecao")
-            elif self.foco:
-                valor = getattr(self, self.foco)
-                if event.key == pygame.K_BACKSPACE:
-                    valor = valor[:-1]
-                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                    self.foco = None
-                    return
-                elif event.unicode and event.unicode in "0123456789." and len(valor) < 7:
-                    valor += event.unicode
-                setattr(self, self.foco, valor)
-        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            x, y = event.pos
-            destino = getattr(self, "destino", self.tela.get_rect())
-            pos = mouse_para_logico(event.pos, tuple(destino))
-            self.foco = next((nome for nome, r in self.campos.items() if r.collidepoint(pos)), None)
-            if not self.foco:
-                for r, acao, ativo in self.botoes:
-                    if ativo and r.collidepoint(pos):
-                        self.acionar(acao)
-                        break
+            self._tecla(event)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
+            self._clique(event)
 
     def resumo_terminal(self):
         linhas = ([self.erro] if self.erro else []) + ["Resumo da sessão"]
