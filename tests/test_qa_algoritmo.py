@@ -70,7 +70,8 @@ def test_diagnostico_repetido_nao_sorteia_e_preserva_erro_inicial(monkeypatch):
     monkeypatch.setattr(qa, 'lista_comidas', proibido)
     nivel, falha = qa.diagnosticar((15, 62, [(7, 7)]))
     assert nivel == 15 and falha['partida'] == 62
-    assert 'esgotada' in falha['erro']
+    assert falha['erro'] is None
+    assert falha['resumo']['morte'] == 'lista_esgotada'
     assert falha['comidas'] == [(7, 7)]
 
 

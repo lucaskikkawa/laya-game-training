@@ -92,8 +92,8 @@ def test_comidas_ocupadas_puladas():
 
 
 def test_lista_esgotada_nao_ressorteia():
-    with pytest.raises(RuntimeError, match="esgotada"):
-        Jogo(15, [(7, 7)])
+    g = Jogo(15, [(7, 7)])
+    assert g.fim and g.morte == "lista_esgotada"
 
 
 @pytest.mark.parametrize("nivel", NIVEIS)
@@ -140,8 +140,8 @@ def test_pulos_deterministas_motivos_passo_e_bfs_original():
 
     a, b = preparar(), preparar()
     assert a.pulos == b.pulos == [
-        {"indice": 0, "posicao": (0, 1), "motivo": "ocupada", "passo": 17},
-        {"indice": 1, "posicao": (0, 3), "motivo": "inalcancavel", "passo": 17}]
+        {"indice": 0, "posicao": (0, 1), "motivo": "ocupada", "passo": 17, "area_alcancavel": 0},
+        {"indice": 1, "posicao": (0, 3), "motivo": "inalcancavel", "passo": 17, "area_alcancavel": 0}]
     assert a.comida == b.comida == (0, 2)
     assert a.indice_comida == b.indice_comida == 3
     assert a.ideal_comida is None  # Pontuação continua com o BFS estático.
@@ -203,8 +203,45 @@ def test_sem_saida_antes_do_limite_registra_inalcancavel_sem_ressortear():
     g.comidas = [(14, 14), (0, 0)]
     g.indice_comida = 0
     g.passos = 42
-    with pytest.raises(RuntimeError, match="esgotada"):
-        g._nova_comida()
-    assert g.pulos == [
-        {"indice": 0, "posicao": (14, 14), "motivo": "inalcancavel", "passo": 42},
-        {"indice": 1, "posicao": (0, 0), "motivo": "ocupada", "passo": 42}]
+    g._nova_comida()
+    assert g.fim and g.morte == "sem_comida_valida"
+    assert g.indice_comida == 0 and g.pulos == []
+
+
+def test_metricas_espaco_conferem_com_bfs_independente():
+    from jogos.snake.regras import metricas_espaco
+    for corpo in ([(2, 2), (1, 2), (0, 2)],
+                  [(0, 0), (1, 0), (1, 1), (0, 1)]):
+        for comida in ((3, 3), (0, 3)):
+            livres = {(x, y) for x in range(4) for y in range(4)} - set(corpo)
+            area = sum(caminho_bfs(corpo[0], p, corpo[1:], 4) is not None for p in livres)
+            rota = caminho_bfs(corpo[0], comida, corpo[1:], 4)
+            assert metricas_espaco(corpo, 4, comida) == {
+                'area_alcancavel': area,
+                'distancia_bfs_comida': len(rota) if rota is not None else None,
+                'rabo_alcancavel': caminho_bfs(corpo[0], corpo[-1], corpo[1:-1], 4) is not None}
+
+
+def test_bolsao_rabo_alcancavel_mas_livre_so_depois_do_prazo():
+    from jogos.snake.regras import alcanca_livre_no_prazo, alcancaveis_no_prazo
+    from jogos.snake.algoritmo import alcanca_rabo
+    corpo = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    assert alcanca_rabo(corpo, 4)
+    assert not alcanca_livre_no_prazo(corpo, 4, 1)
+    assert alcanca_livre_no_prazo(corpo, 4, 2)
+    for prazo in range(5):
+        assert alcanca_livre_no_prazo(corpo, 4, prazo) == bool(
+            alcancaveis_no_prazo(corpo, 4, prazo) - set(corpo))
+
+
+def test_sem_comida_valida_nao_consulta_milhares_de_itens():
+    class ListaAuditada(list):
+        def __getitem__(self, indice):
+            pytest.fail('Não deve consultar candidatas quando nenhuma casa livre é válida')
+    g = jogo()
+    g.corpo = [(x, y) for y in range(8)
+               for x in (range(15) if y % 2 == 0 else range(14, -1, -1))]
+    g.comidas = ListaAuditada([(14, 14)] * 20000)
+    g.indice_comida = 0
+    g._nova_comida()
+    assert g.morte == 'sem_comida_valida' and g.indice_comida == 0

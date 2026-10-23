@@ -2,7 +2,7 @@
 from collections import deque
 from heapq import heappop, heappush
 from itertools import count
-from .regras import ACOES, Jogo, adjacentes, caminho_bfs
+from .regras import ACOES, Jogo, adjacentes, caminho_bfs, alcanca_livre_no_prazo
 
 
 def simular(corpo, rota, comida):
@@ -169,6 +169,8 @@ class Algoritmo:
             return None
         if len(futuro) >= meta:
             return (True, 0, -len(rota))
+        if not alcanca_livre_no_prazo(futuro, self._n, limite):
+            return None
         ocupadas = 0
         for p in futuro:
             ocupadas |= self._bits[p]
@@ -467,9 +469,9 @@ class Algoritmo:
         alternativa = self.busca_corpo(jogo)
         if alternativa:
             valor = self.pontuar(corpo, alternativa, comida, jogo.nivel.meta, jogo.nivel.limite)
-            if melhor is None or (valor and valor > melhor[0]):
+            if valor and (melhor is None or valor > melhor[0]):
                 return alternativa
-        return melhor[1] if melhor else alternativa
+        return melhor[1] if melhor else []
 
     def escolher(self, jogo: Jogo) -> str:
         n = jogo.nivel.tamanho
@@ -485,6 +487,13 @@ class Algoritmo:
             for acao in ACOES:
                 if jogo.destino(acao)[0] == destino and jogo.segura(acao):
                     futuro = simular(jogo.corpo, [destino], jogo.comida)
+                    venceu = destino == jogo.comida and len(futuro) >= jogo.nivel.meta
+                    prazo = (jogo.nivel.limite if destino == jogo.comida
+                             else jogo.nivel.limite - jogo.sem_comer - 1)
+                    if not venceu and not alcanca_livre_no_prazo(futuro, n, prazo):
+                        self._rota.clear()
+                        break
+                    self.estrategia = "seguir_rota_planejada_com_teste_de_escape"
                     self._esperado = (tuple(futuro), jogo.comida, jogo.destino(acao)[1])
                     return acao
         self._esperado = None
@@ -511,7 +520,12 @@ class Algoritmo:
             bit = self._bits[p]
             cresce = p == jogo.comida
             if cresce and len(corpo) + 1 >= jogo.nivel.meta:
+                self.estrategia = "comer_para_vencer"
                 return acao
+            futuro = simular(corpo, [p], jogo.comida)
+            restante = jogo.nivel.limite if cresce else prazo - 1
+            if not alcanca_livre_no_prazo(futuro, n, restante):
+                continue
             # Cabeça e rabo virtuais podem participar da busca de escape.
             bloqueadas = ocupadas & ~self._bits[corpo[-1]]
             if not cresce:
@@ -528,7 +542,9 @@ class Algoritmo:
                      -visitas, -raio, tamanho)
             candidatas.append((valor, acao, p))
         if not candidatas:
-            return "straight"
+            self.estrategia = "sem_movimento_com_escape_no_prazo"
+            return next((a for a in ACOES if jogo.segura(a)), "straight")
+        self.estrategia = "emergencia_priorizar_rabo_area_prazo_e_distancia"
         _, acao, p = max(candidatas, key=lambda c: c[0])
         self._visitadas[p] = self._visitadas.get(p, 0) + 1
         return acao

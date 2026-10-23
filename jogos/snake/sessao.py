@@ -1,11 +1,14 @@
 """Runs pareadas e auditoria JSON; nenhuma dependência de modelo ou interface."""
 from datetime import datetime
+import gzip
 import json
+import subprocess
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from time import perf_counter
 from nucleo.config import raiz
 from .algoritmo import Algoritmo
-from .regras import Jogo, OPCOES, lista_comidas, NIVEIS
+from .regras import Jogo, OPCOES, lista_comidas, NIVEIS, metricas_espaco
 
 
 def salvar_json(caminho: Path, dados):
@@ -14,8 +17,42 @@ def salvar_json(caminho: Path, dados):
     temporario.replace(caminho)
 
 
+def commit_codigo():
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[2],
+                              capture_output=True, text=True, check=True, timeout=2).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def versao_pacote_laya():
+    try:
+        return version("laya")
+    except PackageNotFoundError:
+        return None
+
+
+def escrever_passo(arquivo, registro):
+    arquivo.write(json.dumps({k: v for k, v in registro.items() if k != "estado"},
+                             ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def snapshot(jogo, inicio_lista):
+    return {"passo": jogo.passos, "cabeca": jogo.corpo[0], "corpo": list(jogo.corpo),
+            "direcao": jogo.direcao, "comida": jogo.comida,
+            "indice_comida": inicio_lista + jogo.indice_comida - 1 if jogo.comida is not None else None,
+            "passos_sem_comer": jogo.sem_comer,
+            "restante_limite": max(0, jogo.nivel.limite - jogo.sem_comer)}
+
+
+def termino(jogo):
+    if jogo.vitoria:
+        return "vitoria"
+    return "fome" if jogo.morte == "limite_sem_comer" else jogo.morte
+
+
 def comparar(registros, laya, algoritmo, passos_algoritmo=(), *,
-             pulos_laya=(), pulos_algoritmo=(), comidas_laya=(), comidas_algoritmo=()):
+             pulos_laya=(), pulos_algoritmo=(), comidas_laya=(), comidas_algoritmo=(), arquivos_passos=None):
     acordos = [r["escolha"] == r["jogada_ideal"] for r in registros]
     sequencias = [[(c["indice"], tuple(c["posicao"])) for c in comidas]
                   for comidas in (comidas_laya, comidas_algoritmo)]
@@ -32,7 +69,7 @@ def comparar(registros, laya, algoritmo, passos_algoritmo=(), *,
                       "diferenca_passos": laya["passos"] - algoritmo["passos"]},
             # O gabarito local avalia o estado do Laya. A partida independente
             # pode divergir e durar mais; conservar as duas linhas até o fim.
-            "passo_a_passo": [
+            "passo_a_passo": arquivos_passos if arquivos_passos is not None else [
                 {"passo": i + 1,
                  "concorda": acordos[i] if i < len(acordos) else None,
                  "laya": registros[i] if i < len(registros) else None,
@@ -71,7 +108,11 @@ class Sessao:
         self.registros = []
         self._oraculo = Algoritmo()
         self.inicio = perf_counter()
-        self.documento = {"schema": "snake-v0.1", "gabarito_certificado": False, "criada_em": datetime.now().isoformat(),
+        self.metadados = {"commit_codigo": commit_codigo(), "nivel": nivel, "versao_laya": versao,
+                          "versao_pacote_laya": versao_pacote_laya(), "arquivo_comidas": "comidas.json"}
+        salvar_json(self.pasta / "comidas.json", self.comidas)
+        self._arquivo_laya = None
+        self.documento = {"schema": "snake-v0.2", **self.metadados, "gabarito_certificado": False, "criada_em": datetime.now().isoformat(),
                           "valida_para_treino": True, "motivo": None,
                           "placar": "Laya_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
                           "nivel": nivel, "versao": versao, "modo": modo, "partidas_pedidas": partidas,
@@ -102,6 +143,8 @@ class Sessao:
         self._oraculo = Algoritmo()
         self.inicio_run = perf_counter()
         self._run_ativa = True
+        self._nome_passos_laya = f"run_{self.indice + 1:04d}_laya.jsonl.gz"
+        self._arquivo_laya = gzip.open(self.pasta / self._nome_passos_laya, "wt", encoding="utf-8", compresslevel=1)
         return self.jogo
 
     def passo(self):
@@ -111,17 +154,34 @@ class Sessao:
         estado = jogo.estado()
         ideal = self._oraculo.escolher(jogo)
         decisao = self.decisor.decidir(estado, OPCOES)
-        registro = {"passo": jogo.passos + 1, "estado": estado,
-                    "direcao": jogo.direcao, "corpo": list(jogo.corpo), "comida": jogo.comida,
-                    "indice_comida": self.cursor + jogo.indice_comida - 1,
-                    "ideal_bfs_ao_aparecer": jogo.ideal_comida, "passos_sem_comer": jogo.sem_comer,
-                    "probabilidades": dict(decisao.probabilidades), "escolha": decisao.escolha,
-                    "confianca": decisao.confianca, "jogada_ideal": ideal,
-                    "latencia_ms": decisao.latencia_ms}
+        registro = self._registro(jogo)
+        registro.update({"estado": estado, "probabilidades": dict(decisao.probabilidades),
+                         "escolha": decisao.escolha, "confianca": decisao.confianca,
+                         "jogada_ideal": ideal, "concorda": decisao.escolha == ideal,
+                         "estrategia": "decisao_modelo", "motivo": "Escolha do Laya a partir do estado e das opções",
+                         "estrategia_ideal": self._oraculo.estrategia,
+                         "latencia_ms": decisao.latencia_ms})
         registro["pontos_ganhos"] = jogo.passo(decisao.escolha)
         registro["pontos"] = jogo.pontos
-        self.registros.append(registro)
+        escrever_passo(self._arquivo_laya, registro)
+        self.registros.append({k: registro[k] for k in ("escolha", "jogada_ideal", "latencia_ms")})
         return registro
+
+    def _registro(self, jogo):
+        return {**snapshot(jogo, self.cursor), "passo": jogo.passos + 1,
+                "ideal_bfs_ao_aparecer": jogo.ideal_comida,
+                **metricas_espaco(jogo.corpo, jogo.nivel.tamanho, jogo.comida)}
+
+    def _fechar_passos_laya(self):
+        if self._arquivo_laya is not None:
+            self._arquivo_laya.close()
+            self._arquivo_laya = None
+
+    def _fim_run(self, jogo, motivo=None):
+        return {"schema": "snake-v0.2", **self.metadados,
+                "motivo_termino": motivo or termino(jogo),
+                "snapshot_final": {**snapshot(jogo, self.cursor), "estado": jogo.estado()},
+                "resumo": jogo.resumo()}
 
     def _auditoria_comidas(self, jogo):
         # Jogo usa índices locais; arquivos usam a lista completa da sessão.
@@ -130,8 +190,8 @@ class Sessao:
 
     def _dados_laya(self, status="concluida"):
         segundos = perf_counter() - self.inicio_run
-        return {**self._auditoria_comidas(self.jogo), "status": status, "inicio_lista": self.cursor, "passos": self.registros,
-                "resumo": self.jogo.resumo(), "segundos": segundos,
+        return {**self._auditoria_comidas(self.jogo), "status": status, "inicio_lista": self.cursor, "passos": self._nome_passos_laya,
+                **self._fim_run(self.jogo, "erro" if status == "interrompida" else None), "segundos": segundos,
                 "passos_por_segundo": self.jogo.passos / segundos if segundos else 0,
                 "latencia_media_ms": sum(r["latencia_ms"] for r in self.registros) / max(1, len(self.registros))}
 
@@ -139,22 +199,35 @@ class Sessao:
         if not self._run_ativa or self.jogo is None or not self.jogo.fim:
             raise RuntimeError("Não há run terminada para finalizar")
         identificador = f"run_{self.indice + 1:04d}"
+        self._fechar_passos_laya()
         laya = self._dados_laya()
         salvar_json(self.pasta / f"{identificador}_laya.json", laya)
         # Run independente: mesmas regras, mesma posição inicial e mesmo início da lista.
         gabarito = Jogo(self.nivel, self.comidas[self.cursor:])
         algoritmo = Algoritmo()
-        passos = []
         inicio = perf_counter()
-        while not gabarito.fim:
-            inicio_passo = perf_counter()
-            acao = algoritmo.escolher(gabarito)
-            registro = {"passo": gabarito.passos + 1, "estado": gabarito.estado(), "escolha": acao,
-                        "estrategia": algoritmo.estrategia,
-                        "latencia_ms": (perf_counter() - inicio_passo) * 1000}
-            registro["pontos_ganhos"] = gabarito.passo(acao)
-            registro["pontos"] = gabarito.pontos
-            passos.append(registro)
+        nome_passos_algoritmo = f"{identificador}_algoritmo.jsonl.gz"
+        try:
+            with gzip.open(self.pasta / nome_passos_algoritmo, "wt", encoding="utf-8", compresslevel=1) as arquivo:
+                while not gabarito.fim:
+                    inicio_passo = perf_counter()
+                    acao = algoritmo.escolher(gabarito)
+                    latencia = (perf_counter() - inicio_passo) * 1000
+                    registro = {**self._registro(gabarito), "escolha": acao,
+                                "estrategia": algoritmo.estrategia, "motivo": algoritmo.estrategia,
+                                "latencia_ms": latencia}
+                    registro["pontos_ganhos"] = gabarito.passo(acao)
+                    registro["pontos"] = gabarito.pontos
+                    escrever_passo(arquivo, registro)
+        except Exception:
+            self.documento["valida_para_treino"] = False
+            self.documento["motivo"] = "algoritmo_perdeu"
+            self.documento["status"] = "erro"
+            self._salvar()
+            salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
+                **self._fim_run(gabarito, "erro"), **self._auditoria_comidas(gabarito),
+                "status": "erro", "inicio_lista": self.cursor, "passos": nome_passos_algoritmo})
+            raise
         tempo = perf_counter() - inicio
         # A invalidação é da sessão inteira e persiste nas próximas runs.
         if not gabarito.vitoria:
@@ -163,19 +236,29 @@ class Sessao:
             self._salvar()
         salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
             **self._auditoria_comidas(gabarito),
-            "inicio_lista": self.cursor, "passos": passos, "resumo": gabarito.resumo(),
+            "inicio_lista": self.cursor, "passos": nome_passos_algoritmo,
+            "status": "concluida", **self._fim_run(gabarito),
             "segundos": tempo, "passos_por_segundo": gabarito.passos / max(tempo, 1e-9)})
         auditoria_algoritmo = self._auditoria_comidas(gabarito)
-        comparacao = comparar(self.registros, self.jogo.resumo(), gabarito.resumo(), passos,
+        comparacao = comparar(self.registros, self.jogo.resumo(), gabarito.resumo(),
                              pulos_laya=laya["pulos"], pulos_algoritmo=auditoria_algoritmo["pulos"],
                              comidas_laya=laya["comidas_efetivas"],
-                             comidas_algoritmo=auditoria_algoritmo["comidas_efetivas"])
+                             comidas_algoritmo=auditoria_algoritmo["comidas_efetivas"],
+                             arquivos_passos={"laya": self._nome_passos_laya,
+                                              "algoritmo": nome_passos_algoritmo})
         comparacao["valida_para_treino"] = self.documento["valida_para_treino"]
         comparacao["motivo"] = self.documento["motivo"]
         salvar_json(self.pasta / f"{identificador}_comparacao.json", comparacao)
         resultado = {"run": self.indice + 1, "inicio_lista": self.cursor,
                      "comparacao": comparacao, "passos_por_segundo": laya["passos_por_segundo"],
                      "latencia_media_ms": laya["latencia_media_ms"]}
+        # Falhas de infraestrutura/lista também nunca alimentam o treino.
+        if any(termino(g) in {"lista_esgotada", "sem_comida_valida", "erro"} for g in (self.jogo, gabarito)):
+            self.documento["valida_para_treino"] = False
+            self.documento["motivo"] = self.documento["motivo"] or termino(self.jogo)
+            comparacao["valida_para_treino"] = False
+            comparacao["motivo"] = self.documento["motivo"]
+            salvar_json(self.pasta / f"{identificador}_comparacao.json", comparacao)
         self.resultados.append(resultado)
         self.cursor += max(self.jogo.indice_comida, gabarito.indice_comida)
         self.indice += 1
@@ -189,6 +272,7 @@ class Sessao:
         if self.concluida:
             return
         if self._run_ativa and self.jogo is not None:
+            self._fechar_passos_laya()
             salvar_json(self.pasta / f"run_{self.indice + 1:04d}_laya_parcial.json", self._dados_laya("interrompida"))
         self._run_ativa = False
         # Fechar a janela depois de um erro não deve apagar a causa original.

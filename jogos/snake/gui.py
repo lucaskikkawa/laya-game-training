@@ -123,6 +123,9 @@ class Aplicativo:
         self.estado = "jogando"
         self.status = "Laya está jogando; calculando e registrando decisões."
         self.proximo_passo = perf_counter()
+        if self.jogo.fim:
+            self.estado = "apurando"
+            self._enviar("finalizar", self.sessao.finalizar_run)
 
     def _coletar(self):
         if not self.futuro or not self.futuro.done():

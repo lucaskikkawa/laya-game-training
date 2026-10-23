@@ -78,6 +78,61 @@ def alcancaveis_no_prazo(corpo: list[Celula], n: int, limite: int) -> set[Celula
     return {(i % n, i // n) for i in range(n * n) if alcancadas & (1 << i)}
 
 
+def metricas_espaco(corpo, n, comida=None):
+    """Flood fill estático por bits; cabeça é origem, corpo inteiro bloqueia.
+
+    Área conta só casas livres. Rabo é um destino permitido, sem atravessá-lo.
+    """
+    todas = (1 << (n * n)) - 1
+    esquerda = sum(1 << (y * n) for y in range(n))
+    direita = esquerda << (n - 1)
+
+    def expandir(bits):
+        return (((bits & ~direita) << 1) | ((bits & ~esquerda) >> 1)
+                | (bits << n) | (bits >> n)) & todas
+
+    ocupadas = sum(1 << (y * n + x) for x, y in corpo[1:])
+    fronteira = vistos = 1 << (corpo[0][1] * n + corpo[0][0])
+    alvo = 1 << (comida[1] * n + comida[0]) if comida is not None else 0
+    distancia = 0 if fronteira & alvo else None
+    profundidade = 0
+    while fronteira:
+        profundidade += 1
+        fronteira = expandir(fronteira) & ~ocupadas & ~vistos
+        if distancia is None and fronteira & alvo:
+            distancia = profundidade
+        vistos |= fronteira
+    rabo = 1 << (corpo[-1][1] * n + corpo[-1][0])
+    return {"area_alcancavel": vistos.bit_count() - 1,
+            "distancia_bfs_comida": distancia,
+            "rabo_alcancavel": bool((expandir(vistos) | vistos) & rabo)}
+
+
+def alcanca_livre_no_prazo(corpo, n, prazo):
+    """Há uma casa atualmente livre alcançável antes da fome?
+
+    Entrar apenas no rabo não basta: o corpo pode fechar toda a região.
+    A fronteira temporal permite revisitas e encerra na primeira casa livre.
+    """
+    bits = [1 << (y * n + x) for x, y in corpo]
+    ocupadas = bloqueadas = sum(bits)
+    todas = (1 << (n * n)) - 1
+    esquerda = sum(1 << (y * n) for y in range(n))
+    direita = esquerda << (n - 1)
+    fronteira = bits[0]
+    for tempo in range(1, prazo + 1):
+        if tempo <= len(bits):
+            bloqueadas &= ~bits[-tempo]
+        fronteira = (((fronteira & ~direita) << 1)
+                     | ((fronteira & ~esquerda) >> 1)
+                     | (fronteira << n) | (fronteira >> n)) & todas & ~bloqueadas
+        if fronteira & ~ocupadas:
+            return True
+        if not fronteira:
+            break
+    return False
+
+
 def lista_comidas(n: int, quantidade: int = 20000) -> list[Celula]:
     return [(randbelow(n), randbelow(n)) for _ in range(quantidade)]
 
@@ -108,13 +163,20 @@ class Jogo:
         self.comida = None
         ocupadas = set(self.corpo)
         alcancaveis = alcancaveis_no_prazo(self.corpo, self.nivel.tamanho, self.nivel.limite)
+        if not alcancaveis - ocupadas:
+            self.fim = True
+            self.morte = "sem_comida_valida"
+            return
+        area = None
         while self.indice_comida < len(self.comidas):
             p = self.comidas[self.indice_comida]
             self.indice_comida += 1
             motivo = "ocupada" if p in ocupadas else "inalcancavel" if p not in alcancaveis else None
             if motivo:
+                if area is None:
+                    area = metricas_espaco(self.corpo, self.nivel.tamanho)["area_alcancavel"]
                 self.pulos.append({"indice": self.indice_comida - 1, "posicao": p,
-                                   "motivo": motivo, "passo": self.passos})
+                                   "motivo": motivo, "passo": self.passos, "area_alcancavel": area})
             else:
                 self.comida = p
                 self.comidas_efetivas.append({"indice": self.indice_comida - 1,
@@ -122,8 +184,9 @@ class Jogo:
                 rota = caminho_bfs(self.corpo[0], p, self.corpo[1:], self.nivel.tamanho)
                 self.ideal_comida = len(rota) if rota is not None else None
                 return
-        # Nunca sortear fora da lista registrada: erro de sessão, não derrota de jogo.
-        raise RuntimeError("Lista de comidas esgotada; aumente a quantidade da sessão")
+        # Nunca sortear fora da lista registrada.
+        self.fim = True
+        self.morte = "lista_esgotada"
 
     def destino(self, acao: str):
         if acao not in ACOES:

@@ -105,10 +105,12 @@ def test_qa_preserva_erro_de_lista_como_falha(monkeypatch):
     monkeypatch.setattr(Algoritmo, "escolher", lambda self, jogo: "straight")
     nivel, falha = qa_algoritmo.diagnosticar((15, 9))
     assert nivel == 15 and falha["partida"] == 9
-    assert "esgotada" in falha["erro"]
+    assert falha["erro"] is None
+    assert falha["resumo"]["morte"] == "lista_esgotada"
     assert falha["comidas"] == comidas
     assert falha["pulos"] == [
-        {"indice": 1, "posicao": (8, 7), "motivo": "ocupada", "passo": 1}]
+        {"indice": 1, "posicao": (8, 7), "motivo": "ocupada", "passo": 1,
+         "area_alcancavel": 221}]
 
 
 def test_gargalo_detectado_mesmo_sem_becos():
@@ -188,3 +190,26 @@ def test_desvio_pelo_rabo_antes_de_comer_e_simulado_no_prazo():
     futuro = simular(g.corpo, rota, g.comida)
     assert futuro is not None and futuro[0] == g.comida
     assert len(futuro) == len(g.corpo) + 1
+
+
+def test_pontuar_rejeita_bolsao_mesmo_com_rabo_alcancavel():
+    algoritmo = Algoritmo()
+    algoritmo.configurar(4)
+    # Comer fecha o quadrado no canto; o rabo é vizinho, mas não há casa
+    # livre disponível no prazo de um passo depois do crescimento.
+    corpo = [(1, 0), (1, 1), (0, 1)]
+    futuro = simular(corpo, [(0, 0)], (0, 0))
+    assert alcanca_rabo(futuro, 4)
+    assert algoritmo.pontuar(corpo, [(0, 0)], (0, 0), 10, 1) is None
+    # A vitória encerra antes de precisar de outra comida.
+    assert algoritmo.pontuar(corpo, [(0, 0)], (0, 0), 4, 1)[0]
+
+
+def test_emergencia_recusa_bolsao_com_prazo_insuficiente():
+    g = Jogo(15, [(8, 7)])
+    g.corpo = [(1, 0), (1, 1), (0, 1), (0, 2)]
+    g.direcao = 0
+    g.sem_comer = 58
+    algoritmo = Algoritmo()
+    assert g.segura('left')  # (0,0): único passo seguinte seria corpo bloqueado
+    assert algoritmo.emergencia(g) == 'right'
