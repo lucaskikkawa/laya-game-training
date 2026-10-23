@@ -11,50 +11,47 @@ com sua configuração (200 gomos, 120 passos) em `NIVEIS_ADIADOS`.
 O BFS continua sendo o principal, sem consultar comidas futuras. Calcula uma
 rota temporal até a comida, simula o crescimento e testa o escape até o rabo.
 Compara seis aproximações ponderadas, preferindo manter o espaço livre
-conectado, sem becos ou articulações. Pode reparar a rota com pequenos desvios;
-a reparação tem orçamento de cerca de 15 ms e retorna ao encontrar uma solução
-sem esses defeitos. As buscas extensas sobre configurações do corpo continuam
-disponíveis para diagnóstico, mas não são executadas em cada decisão do jogo.
-O caminho rápido evita essas buscas para visar decisões abaixo de ~50 ms no
-25x25; isso é uma meta de latência, não um prazo rígido em qualquer máquina.
+conectado, sem becos ou articulações. Pode reparar a rota com pequenos desvios
+ou recorrer às buscas sobre configurações do corpo e a desvios pelo rabo.
+O planejador completo é executado quando não há uma rota em cache; o caminho
+rápido fica disponível para os atalhos do modo segurança. As buscas completas
+podem aumentar a latência em estados difíceis.
 
 Cada nível mantém um ciclo imutável pré-calculado e seu índice por casa,
 mesmo enquanto o BFS joga. O modo `seguranca` é acionado quando:
 
 - o rabo é inalcançável no flood fill estático: `rabo_inalcancavel`;
 - a área livre alcançável é menor que o número de gomos: `area_pequena`;
-- não há rota validada pelo planejador, ou ela é incompatível com a ordem
-  exigida para a transição: `bfs_sem_caminho_seguro`.
+- não há rota validada pelo planejador: `bfs_sem_caminho_seguro`.
 
 Essa é também a prioridade dos motivos quando vários gatilhos coincidem.
 A área exclui cabeça e corpo; o teste do rabo permite o próprio rabo como
 único destino ocupado. O motivo é reavaliado antes de cada movimento.
 
-A partir de metade da meta de gomos do nível, o BFS deve respeitar a ordem
-circular do ciclo. Atalhos no estilo Tapsell avançam a cabeça sem ultrapassar
-o rabo nem saltar a comida. Reservam uma casa de folga, uma adicional ao
-crescer e outra para atalhos maiores que uma aresta. Toda a rota é simulada,
-inclusive seu crescimento, para verificar a ordem em cada passo. Corpo
-alinhado significa ordem circular do rabo até a cabeça, admitindo lacunas;
-não exige segmentos consecutivos no ciclo.
+O tamanho e o desalinhamento do corpo não acionam segurança. A ordem circular
+não restringe as rotas BFS nem a emergência: impor essa ordem a partir de
+metade da meta (apenas cerca de 11% do tabuleiro) causava fome. Os atalhos
+ordenados ficam restritos ao recurso de segurança: avançam sem ultrapassar
+o rabo nem saltar a comida, reservando folga para crescimento.
 
 Na segurança, um corpo alinhado tenta atalhos ordenados e depois o sucessor
 do ciclo. Se estiver desalinhado, segue um caminho livre até o rabo, preferindo
-avançar na ordem do ciclo para desfazer o desalinho, sem comer durante
-essa aproximação. Mantém a transição enquanto estiver
-desalinhado, mesmo que a área volte a crescer; só retoma o BFS ao alinhar e
-cessarem os gatilhos. Seguir o rabo não prova convergência para todo corpo
-arbitrário, e o limite sem comer continua valendo durante a transição.
-Se o rabo não puder ser seguido, a emergência prioriza escape, área e prazo;
-atalhos de emergência também verificam a ordem quando aplicável. Sem saída
-validada, resta uma ação sem colisão imediata, se existir.
+avançar na ordem do ciclo. Não mantém uma transição obrigatória até alinhar:
+o planejador principal é tentado novamente no próximo passo e, cessados os
+gatilhos reais, o BFS retoma imediatamente. Uma rota temporal com crescimento
+e escape validados tem prioridade sobre seguir o ciclo ou alinhar, mesmo com
+gatilho estático de área/rabo ainda ativo: o rabo pode ser liberado durante a
+rota. Essa decisão mantém `modo=seguranca` e o motivo real. A partir de 75%
+do limite sem comer, identifica a estratégia como `seguranca_bfs_comida_no_prazo`. Se o rabo não puder
+ser seguido, a emergência prioriza escape, área e prazo. Sem saída validada,
+resta uma ação sem colisão imediata, se existir.
 
 No 20x20 o ciclo cobre as 400 casas. No 15x15 e no 25x25, a paridade impede
 um ciclo hamiltoniano completo: o ciclo cobre respectivamente 224 e 624
 casas e deixa `(n-1, 0)` de fora. Essa casa continua pertencendo ao jogo e
-pode receber comida. Para uma cobra grande, a exceção só permite sair da
-ordem no último movimento até essa comida, com crescimento e escape
-validados; depois segue o rabo para reentrar e alinhar. **Não há garantia
+pode receber comida. O BFS pode chegar a essa casa por qualquer rota com
+crescimento e escape validados. O recurso de ciclo tenta preservar a ordem
+até o último movimento até essa casa. **Não há garantia
 total de vitória nos mapas ímpares**, nem de comer dentro do prazo seguindo
 apenas o ciclo, mesmo no mapa par. Níveis, metas, pontuação e limites
 permanecem 15/50/60, 20/90/80 e 25/140/100.
@@ -126,6 +123,10 @@ diretório temporário e informa o caminho na asserção. Todas essas listas usa
 `secrets.randbelow`; o padrão do script é 200 por nível e nenhuma falha é aceita.
 A repetição usa exclusivamente as listas salvas, sem sorteios novos, informa
 cada partida e imprime o resultado final; aceita fixtures ou o relatório de QA.
+Os relatórios somam `passos`, `passos_seguranca` e `mortes_fome_seguranca`
+por nível, inclusive nas vitórias. A última contagem considera morte por
+`limite_sem_comer` no movimento marcado como segurança; o histórico das
+falhas inclui `modo` e `motivo_seguranca`.
 
 ## Resultados históricos (anteriores ao híbrido)
 
@@ -148,3 +149,31 @@ Após a correção única (deduplicação pelo corpo ordenado), foram repetidas
 somente as partidas **62: vitória** e **128: vitória**, com as mesmas listas
 completas: **2/2 (100%)**. Relatório: `/tmp/qa_repeticao_25x25.json`.
 O QA completo não foi executado nesta rodada.
+
+## Validação da regressão do híbrido (2026-10-22)
+
+Removida a imposição de ordem circular a partir de metade da meta e a
+transição persistente por desalinhamento. Restaurado o planejador completo;
+rotas temporais com escape validado não são interrompidas por um alerta
+estático de área/rabo. Níveis, metas e limites permanecem iguais.
+
+QA de 10 partidas por nível, quatro processos, sem repetir sorteios nem
+descartar falhas desta execução:
+
+| Nível | Vitórias | Passos em segurança / totais | Mortes por fome em segurança |
+| --- | --- | --- | --- |
+| 15x15 | 10/10 | 49/7288 | 0 |
+| 20x20 | 10/10 | 265/19088 | 0 |
+| 25x25 | 9/10 | 871/39719 | 1 |
+
+Total: **29/30 (96,7%)**. O script ainda retorna reprovação porque exige
+100%: houve uma fome residual em segurança com 132 gomos no 25x25,
+partida 0. A lista completa e o histórico estão em `/workspace/qa/x.json`;
+não foi substituída por outro sorteio. Não é uma certificação de 100%.
+
+As duas listas originais de `tests/fixtures/derrotas_25x25.json` venceram:
+**2/2**, com **198/7920** passos em segurança e **zero** mortes por fome
+em segurança. Relatório: `/workspace/qa/repeticao.json`.
+
+`SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy .venv/bin/pytest -q -m 'not slow'`:
+**128 passed, 5 deselected**.

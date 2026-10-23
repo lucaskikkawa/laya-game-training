@@ -66,7 +66,6 @@ class Algoritmo:
         self._n = None
         self.modo = "bfs"
         self.motivo_seguranca = None
-        self._alinhando = None
 
     def configurar(self, n):
         self._n = n
@@ -86,7 +85,6 @@ class Algoritmo:
         self._comida = None
         self._rota = deque()
         self._esperado = None
-        self._alinhando = None
 
     def expandir(self, bits):
         return (((bits & self._nao_direita) << 1) |
@@ -646,33 +644,32 @@ class Algoritmo:
         assinatura = (tuple(jogo.corpo), jogo.comida, jogo.direcao)
         if assinatura != self._esperado:
             self._rota.clear()
-            self._alinhando = None
         metricas = metricas_espaco(jogo.corpo, n, jogo.comida)
-        grande = len(jogo.corpo) >= jogo.nivel.meta // 2
-        ordenar = grande
         motivo = None
         if not metricas["rabo_alcancavel"]:
             motivo = "rabo_inalcancavel"
         elif metricas["area_alcancavel"] < len(jogo.corpo):
             motivo = "area_pequena"
-        elif (ordenar or self._alinhando) and not self.alinhado(jogo.corpo):
-            motivo = self._alinhando or "bfs_sem_caminho_seguro"
-        if self.alinhado(jogo.corpo):
-            self._alinhando = None
-        if not motivo:
-            if self._rota and ordenar and not self.rota_ordenada(jogo.corpo, self._rota, jogo.comida):
-                self._rota.clear()
-            if not self._rota:
-                self._rota.extend(self.planejar_rapido(jogo, ordenar))
-            if not self._rota:
-                motivo = "bfs_sem_caminho_seguro"
+        # O planejador completo continua principal, sem impor ordem circular.
+        # Desalinhamento e tamanho, sozinhos, não são sinais de perigo.
+        if not self._rota:
+            self._rota.extend(self.planejar(jogo))
+        if not self._rota:
+            motivo = motivo or "bfs_sem_caminho_seguro"
         destino = None
         if motivo:
             self.modo, self.motivo_seguranca = "seguranca", motivo
-            if not self.alinhado(jogo.corpo):
-                self._alinhando = motivo
-            self._rota.clear()
-            destino = self.seguir_seguranca(jogo)
+            # O flood fill é estático: pode perder o rabo no meio de uma
+            # rota temporal já validada. Não interromper essa rota para alinhar.
+            # Isso também garante prioridade à comida perto do limite de fome.
+            if self._rota:
+                destino = self._rota.popleft()
+                self.estrategia = ("seguranca_bfs_comida_no_prazo"
+                                   if jogo.sem_comer >= jogo.nivel.limite * 3 // 4
+                                   else "seguranca_bfs_escape_validado")
+            else:
+                self._rota.clear()
+                destino = self.seguir_seguranca(jogo)
         else:
             destino = self._rota.popleft()
             self.estrategia = "seguir_rota_planejada_com_teste_de_escape"
@@ -713,9 +710,6 @@ class Algoritmo:
             if not jogo.segura(acao):
                 continue
             p, _ = jogo.destino(acao)
-            if (self.alinhado(corpo) and jogo.comida in self.ordem
-                    and not self.passo_ordenado(corpo, p, jogo.comida)):
-                continue
             bit = self._bits[p]
             cresce = p == jogo.comida
             if cresce and len(corpo) + 1 >= jogo.nivel.meta:

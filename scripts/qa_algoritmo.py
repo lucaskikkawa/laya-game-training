@@ -28,13 +28,17 @@ def diagnosticar(tarefa):
     algoritmo = Algoritmo()
     historico = deque(maxlen=NIVEIS[nivel].limite + 1)
     erro = None
+    medidas = {"passos": 0, "passos_seguranca": 0, "mortes_fome_seguranca": 0}
     try:
         jogo = Jogo(nivel, comidas)
         while not jogo.fim:
             acao = algoritmo.escolher(jogo)
+            medidas["passos"] += 1
+            medidas["passos_seguranca"] += algoritmo.modo == "seguranca"
             historico.append({"cabeca": jogo.corpo[0], "comida": jogo.comida,
                               "sem_comer": jogo.sem_comer, "acao": acao,
-                              "estrategia": algoritmo.estrategia})
+                              "estrategia": algoritmo.estrategia, "modo": algoritmo.modo,
+                              "motivo_seguranca": algoritmo.motivo_seguranca})
             jogo.passo(acao)
     except RuntimeError as exc:
         erro = str(exc)
@@ -45,7 +49,9 @@ def diagnosticar(tarefa):
                  "sem_comer": jogo.sem_comer if jogo else None, "direcao": jogo.direcao if jogo else None,
                  "indice_comida": jogo.indice_comida if jogo else None, "historico": list(historico),
                  "erro": erro, "pulos": jogo.pulos if jogo else []}
-    return nivel, falha
+    medidas["mortes_fome_seguranca"] = int(
+        jogo is not None and jogo.morte == "limite_sem_comer" and algoritmo.modo == "seguranca")
+    return nivel, falha, medidas
 
 
 def carregar_falhas(arquivo):
@@ -88,15 +94,18 @@ def main(argv=None):
         tarefas = [(n, i) for n in args.nivel for i in range(args.partidas)]
     resultados = {}
     for n, *_ in tarefas:
-        resultado = resultados.setdefault(n, {"nivel": n, "partidas": 0, "vitorias": 0, "falhas": []})
+        resultado = resultados.setdefault(n, {"nivel": n, "partidas": 0, "vitorias": 0, "falhas": [],
+                                            "passos": 0, "passos_seguranca": 0, "mortes_fome_seguranca": 0})
         resultado["partidas"] += 1
     concluidas = dict.fromkeys(resultados, 0)
     args.saida.parent.mkdir(parents=True, exist_ok=True)
     with ProcessPoolExecutor(max_workers=args.processos) as pool:
         pendentes = {pool.submit(diagnosticar, tarefa): tarefa for tarefa in tarefas}
         for futuro in as_completed(pendentes):
-            nivel, falha = futuro.result()
+            nivel, falha, medidas = futuro.result()
             resultado = resultados[nivel]
+            for chave, valor in medidas.items():
+                resultado[chave] += valor
             concluidas[nivel] += 1
             resultado["vitorias"] += falha is None
             if falha is not None:
@@ -106,7 +115,9 @@ def main(argv=None):
                 print(f'{nivel}x{nivel} partida {pendentes[futuro][1]}: '
                       + (f'FALHA ({motivo})' if falha else 'VITÓRIA'), flush=True)
             if concluidas[nivel] % 10 == 0 or concluidas[nivel] == resultado["partidas"]:
-                print(f'{nivel}x{nivel}: {resultado["vitorias"]}/{concluidas[nivel]} vitórias', flush=True)
+                print(f'{nivel}x{nivel}: {resultado["vitorias"]}/{concluidas[nivel]} vitórias; '
+                      f'{resultado["passos_seguranca"]}/{resultado["passos"]} passos em segurança; '
+                      f'{resultado["mortes_fome_seguranca"]} mortes por fome em segurança', flush=True)
                 args.saida.write_text(json.dumps({"resultados": list(resultados.values()),
                     "segundos": perf_counter() - inicio}), encoding="utf-8")
     vitorias = sum(r["vitorias"] for r in resultados.values())

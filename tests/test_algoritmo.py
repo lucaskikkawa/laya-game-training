@@ -103,7 +103,7 @@ def test_qa_preserva_erro_de_lista_como_falha(monkeypatch):
     monkeypatch.setattr(qa_algoritmo, "lista_comidas", lambda n: comidas)
     # Ao comer a primeira, a única candidata restante está ocupada.
     monkeypatch.setattr(Algoritmo, "escolher", lambda self, jogo: "straight")
-    nivel, falha = qa_algoritmo.diagnosticar((15, 9))
+    nivel, falha, _ = qa_algoritmo.diagnosticar((15, 9))
     assert nivel == 15 and falha["partida"] == 9
     assert falha["erro"] is None
     assert falha["resumo"]["morte"] == "lista_esgotada"
@@ -232,6 +232,7 @@ def test_gatilho_bfs_sem_rota_e_retorno_ao_bfs(monkeypatch):
     g = Jogo(20, [(12, 10), (0, 0)])
     a = Algoritmo()
     with monkeypatch.context() as patch:
+        patch.setattr(a, 'planejar', lambda *args, **kwargs: [])
         patch.setattr(a, 'planejar_rapido', lambda *args, **kwargs: [])
         acao = a.escolher(g)
     assert g.segura(acao)
@@ -269,16 +270,13 @@ def jogo_no_ciclo(nivel=20, indice=100):
 
 
 @pytest.mark.parametrize('nivel', (15, 20, 25))
-def test_bfs_grande_respeita_ordem_inclusive_ao_crescer(nivel):
+def test_bfs_acima_do_antigo_limiar_chega_a_comida_sem_impor_ordem(nivel):
     g, a = jogo_no_ciclo(nivel)
     for _ in range(g.nivel.limite):
-        antes = list(g.corpo)
-        comida = g.comida
         acao = a.escolher(g)
         assert g.segura(acao)
-        assert a.passo_ordenado(antes, g.destino(acao)[0], comida)
+        assert a.modo == 'bfs' and a.motivo_seguranca is None
         g.passo(acao)
-        assert a.alinhado(g.corpo)
         if g.comidas_consumidas:
             break
     assert g.comidas_consumidas == 1 and not g.fim
@@ -303,31 +301,29 @@ def test_atalhos_nao_pulam_comida_nem_rabo_e_reservam_folga():
 
 def test_seguranca_alinhada_segue_ciclo_quando_nao_ha_atalho(monkeypatch):
     g, a = jogo_no_ciclo()
+    monkeypatch.setattr(a, 'planejar', lambda *args, **kwargs: [])
     monkeypatch.setattr(a, 'planejar_rapido', lambda *args, **kwargs: [])
     acao = a.escolher(g)
     assert a.modo == 'seguranca' and a.estrategia == 'seguranca_ciclo'
     assert g.destino(acao)[0] == a.ciclo[101]
 
 
-def test_transicao_desalinhada_segue_rabo_ate_alinhar():
-    g = Jogo(20, [(15, 15)])
+def test_desalinhamento_nao_aciona_seguranca_com_bfs_disponivel():
+    g = Jogo(20, [(15, 15)] + [(x, y) for y in range(20) for x in range(20)])
     g.corpo = ([(x, 0) for x in range(19, -1, -1)]
                + [(0, y) for y in range(1, 20)] + [(x, 19) for x in range(1, 12)])
     g.direcao = 1
     a = Algoritmo()
     a.configurar(20)
     assert not a.alinhado(g.corpo)
-    for _ in range(12):
-        from jogos.snake.regras import caminho_bfs
-        rabo = caminho_bfs(g.corpo[0], g.corpo[-1], g.corpo[1:-1] + [g.comida], 20)
+    for _ in range(g.nivel.limite):
         acao = a.escolher(g)
-        assert a.modo == 'seguranca'
-        assert a.estrategia == 'seguranca_alinhar_seguindo_rabo'
-        assert g.destino(acao)[0] == rabo[0]
+        assert a.modo == 'bfs' and a.motivo_seguranca is None
+        assert g.segura(acao)
         g.passo(acao)
-        if a.alinhado(g.corpo):
+        if g.comidas_consumidas:
             break
-    assert not g.fim
+    assert g.comidas_consumidas == 1 and not g.fim
 
 
 @pytest.mark.parametrize('nivel', (15, 25))
@@ -339,16 +335,17 @@ def test_comida_na_casa_omitida_tem_escape_e_reentrada(nivel):
     g.corpo = [a.ciclo[(indice - i) % len(a.ciclo)] for i in range(tamanho)]
     g.direcao = 0
     g.comida = (nivel - 1, 0)
-    acao = a.escolher(g)
-    assert g.segura(acao) and g.destino(acao)[0] == g.comida
-    g.passo(acao)
-    assert g.comidas_consumidas == 1
-    if not g.fim:
+    for _ in range(g.nivel.limite):
         acao = a.escolher(g)
-        assert g.segura(acao) and g.destino(acao)[0] in a.ordem
+        assert g.segura(acao)
+        g.passo(acao)
+        if g.comidas_consumidas:
+            break
+    assert g.comidas_consumidas == 1 and not g.fim
+    assert alcanca_rabo(g.corpo, nivel)
 
 
-def test_transicao_solta_desalinho_no_rabo_e_preserva_ordem():
+def test_seguranca_solta_desalinho_no_rabo_e_retorna_ao_bfs(monkeypatch):
     from jogos.snake.regras import DIRECOES
     g, a = jogo_no_ciclo()
     g.corpo = list(reversed(a.ciclo[60:100])) + [
@@ -357,14 +354,16 @@ def test_transicao_solta_desalinho_no_rabo_e_preserva_ordem():
                                g.corpo[0][1] - g.corpo[1][1]))
     g.comida = (15, 15)
     assert not a.alinhado(g.corpo)
-    acao = a.escolher(g)
+    with monkeypatch.context() as patch:
+        patch.setattr(a, 'planejar', lambda *args: [])
+        acao = a.escolher(g)
     assert a.estrategia == 'seguranca_alinhar_seguindo_rabo'
     assert a.modo == 'seguranca' and g.segura(acao)
     g.passo(acao)
     assert a.alinhado(g.corpo)
-    antes = list(g.corpo)
     acao = a.escolher(g)
-    assert a.passo_ordenado(antes, g.destino(acao)[0], g.comida)
+    assert a.modo == 'bfs' and a.motivo_seguranca is None
+    assert g.segura(acao)
 
 
 @pytest.mark.parametrize('nivel', (15, 25))
@@ -378,4 +377,28 @@ def test_comida_omitida_nao_e_consumida_sem_saida(nivel):
     # A outra saída da casa omitida está ocupada pelo corpo, longe do rabo.
     acao = a.escolher(g)
     assert g.segura(acao) and g.destino(acao)[0] != g.comida
-    assert a.modo == 'seguranca'
+    assert a.modo == 'bfs'
+
+
+@pytest.mark.parametrize('sem_comer', (0, 45))
+def test_seguranca_prioriza_bfs_validado_inclusive_perto_da_fome(monkeypatch, sem_comer):
+    g = Jogo(15, [(0, 3), (10, 10)])
+    g.corpo = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    g.direcao = 2
+    g.sem_comer = sem_comer
+    a = Algoritmo()
+
+    def ciclo_proibido(*args):
+        pytest.fail('Rota validada à comida deve ter prioridade perto da fome')
+
+    monkeypatch.setattr(a, 'seguir_seguranca', ciclo_proibido)
+    acao = a.escolher(g)
+    assert a.modo == 'seguranca' and a.motivo_seguranca == 'area_pequena'
+    assert a.estrategia == ('seguranca_bfs_comida_no_prazo' if sem_comer == 45
+                            else 'seguranca_bfs_escape_validado')
+    g.passo(acao)
+    while not g.fim and not g.comidas_consumidas:
+        acao = a.escolher(g)
+        assert a.modo == 'bfs' and a.motivo_seguranca is None
+        g.passo(acao)
+    assert g.comidas_consumidas == 1 and not g.fim

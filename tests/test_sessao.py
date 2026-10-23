@@ -503,7 +503,7 @@ def test_modo_seguranca_real_e_contagem_nas_duas_runs(tmp_path, monkeypatch):
 def test_contagem_seguranca_preservada_na_run_parcial(tmp_path, monkeypatch):
     s = Sessao(MockLaya(), pasta=tmp_path, comidas=[(0, 0)])
     s.iniciar_run()
-    monkeypatch.setattr(s._oraculo, 'planejar_rapido', lambda *args, **kwargs: [])
+    monkeypatch.setattr(s._oraculo, 'planejar', lambda *args, **kwargs: [])
     r = s.passo()
     assert r['modo'] == 'seguranca'
     s.interromper()

@@ -73,9 +73,11 @@ Telas de resultado:
 - Híbrido na v0.1 (etapa 3): BFS principal com teste do rabo após crescer e
   ciclo de segurança pré-calculado por nível. Entra em segurança se faltar
   caminho seguro, a área livre alcançável for menor que a cobra ou o rabo
-  ficar inalcançável. A partir de metade da meta, o BFS respeita a ordem do
-  ciclo, sem ultrapassar o rabo nem pular comida, reservando folga; segue o
-  rabo durante a transição de um corpo desalinhado.
+  ficar inalcançável. O planejador BFS completo não exige ordem circular;
+  tamanho e desalinhamento não são gatilhos. Reavalia o BFS em cada passo de
+  segurança e preserva rotas temporais validadas mesmo com risco estático de
+  área/rabo, incluindo perto do limite sem comer.
+  O ciclo e os atalhos ordenados ficam como recursos do modo segurança.
 - 20x20: ciclo completo. 15x15 e 25x25: ciclo com uma casa omitida, `(n-1, 0)`,
   com saída validada para comer nela e posterior reentrada; sem garantia
   total. O limite sem comer permanece 100 no 25x25. Detalhes em
