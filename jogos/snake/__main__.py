@@ -12,7 +12,10 @@ def argumentos(argv=None):
     parser.add_argument("--modo", choices=("normal", "rapido"), default="normal")
     parser.add_argument("--passos-por-segundo", type=float)
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--sem-janela", action="store_true")
     args = parser.parse_args(argv)
+    if args.sem_janela and (args.modo != "rapido" or args.partidas is None):
+        parser.error("--sem-janela exige --partidas N --modo rapido")
     args.auto_iniciar = args.partidas is not None
     if args.partidas is None:
         args.partidas = 1
@@ -24,8 +27,12 @@ def argumentos(argv=None):
 
 
 def main():
+    args = argumentos()
+    if args.sem_janela:
+        from .terminal import executar
+        return executar(args)
     from .gui import Aplicativo
-    app = Aplicativo(argumentos())
+    app = Aplicativo(args)
     app.executar()
     return 1 if app.erro else 0
 
