@@ -23,3 +23,9 @@ modelos/
 *.egg-info/
 build/
 dist/
+*.log
+logs/
+*.gz
+.env.*
+*.pem
+*.p12
