@@ -6,13 +6,16 @@ from .regras import NIVEIS
 
 def argumentos(argv=None):
     parser = argparse.ArgumentParser(description="Snake Laya v0.1")
-    parser.add_argument("--partidas", type=int, default=1)
+    parser.add_argument("--partidas", type=int, default=None)
     parser.add_argument("--nivel", type=int, choices=NIVEIS, default=15)
     parser.add_argument("--versao", default="v000")
     parser.add_argument("--modo", choices=("normal", "rapido"), default="normal")
     parser.add_argument("--passos-por-segundo", type=float)
     parser.add_argument("--cpu", action="store_true")
     args = parser.parse_args(argv)
+    args.auto_iniciar = args.partidas is not None
+    if args.partidas is None:
+        args.partidas = 1
     if args.partidas < 1 or (args.passos_por_segundo is not None and (not math.isfinite(args.passos_por_segundo) or args.passos_por_segundo <= 0)):
         parser.error("Partidas e passos por segundo devem ser positivos")
     if args.passos_por_segundo is None:
@@ -22,8 +25,10 @@ def argumentos(argv=None):
 
 def main():
     from .gui import Aplicativo
-    Aplicativo(argumentos()).executar()
+    app = Aplicativo(argumentos())
+    app.executar()
+    return 1 if app.erro else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

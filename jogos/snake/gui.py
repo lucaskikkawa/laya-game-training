@@ -34,7 +34,7 @@ class Aplicativo:
         self.modo = args.modo
         self.velocidade = str(args.passos_por_segundo).removesuffix(".0")
         self.partidas = str(args.partidas)
-        self.automatico = args.partidas > 1
+        self.automatico = args.auto_iniciar or args.partidas > 1
         self.decisor_injetado = decisor
         self.pasta_runs = pasta_runs
         self.estado = "selecao"
@@ -463,19 +463,51 @@ class Aplicativo:
                         self.acionar(acao)
                         break
 
+    def resumo_terminal(self):
+        linhas = ["Resumo da sessão"]
+        total_laya = total_algoritmo = 0
+        for i, resultado in enumerate(self.sessao.resultados if self.sessao else [], 1):
+            geral = resultado["comparacao"]["geral"]
+            laya = geral["laya"]["pontos"]
+            algoritmo = geral["algoritmo"]["pontos"]
+            linhas.append(f"Partida {i}: Laya: {laya} pontos · Algoritmo: {algoritmo} pontos")
+            total_laya += laya
+            total_algoritmo += algoritmo
+        linhas.append(f"Totais: Laya: {total_laya} pontos · Algoritmo: {total_algoritmo} pontos")
+        if self.erro:
+            linhas.append(self.erro)
+        return "\n".join(linhas)
+
     def executar(self, max_frames=None):
         clock = pygame.time.Clock()
         frames = 0
         try:
+            if self.args.auto_iniciar:
+                self.iniciar()
             while self.rodando and (max_frames is None or frames < max_frames):
+                if self.args.auto_iniciar and self.erro:
+                    break
                 dt = clock.tick(60) / 1000
                 for event in pygame.event.get():
                     self.evento(event)
                 self.atualizar(dt)
+                if self.args.auto_iniciar and (self.erro or
+                        self.estado == "resultado" and self.sessao.concluida):
+                    break
                 self.desenhar()
                 frames += 1
+        except Exception as exc:
+            if not self.args.auto_iniciar:
+                raise
+            self.erro = f"Falha: {type(exc).__name__}: {exc}"
+            self.estado = "erro"
         finally:
-            self.fechar()
+            try:
+                self.fechar()
+            finally:
+                if self.args.auto_iniciar and (self.erro or
+                        self.sessao and self.sessao.concluida):
+                    print(self.resumo_terminal())
 
     def fechar(self):
         if self._fechado:
