@@ -510,3 +510,22 @@ def test_contagem_seguranca_preservada_na_run_parcial(tmp_path, monkeypatch):
     run = ler_run(s.pasta, 'run_0001_laya_parcial.json')
     assert run['resumo']['passos_seguranca_por_motivo'] == {
         'bfs_sem_caminho_seguro': 1, 'area_pequena': 0, 'rabo_inalcancavel': 0}
+
+
+def test_placar_inclui_algoritmo_e_historico_completo(tmp_path):
+    s = Sessao(MockLaya(), pasta=tmp_path, comidas=[(0, 0)])
+    resultado = executar(s)
+    placar = json.loads((s.pasta / f"{s.documento['placar']}.json").read_text())
+    assert placar['runs'][0]['pontos_algoritmo'] == resultado['comparacao']['geral']['algoritmo']['pontos']
+    run = ler_run(s.pasta, 'run_0001_laya.json')
+    assert run['historico_confianca'] == [r['confianca'] for r in run['passos']]
+    assert len(run['historico_confianca']) == s.jogo.passos > 1
+    assert all(r['confianca'] == .7 for r in s.registros)
+
+
+def test_historico_preservado_na_interrupcao(tmp_path):
+    s = Sessao(MockLaya(), pasta=tmp_path, comidas=[(0, 0)])
+    s.iniciar_run()
+    s.passo()
+    s.interromper()
+    assert ler_run(s.pasta, 'run_0001_laya_parcial.json')['historico_confianca'] == [.7]

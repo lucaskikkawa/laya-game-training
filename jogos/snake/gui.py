@@ -10,6 +10,7 @@ from nucleo.config import versoes
 from nucleo.laya_processo import LayaProcesso
 from .regras import NIVEIS, NOMES_DIRECAO
 from .sessao import Sessao
+from .controles import Pausa
 from .sons import Sons
 
 FUNDO = (9, 18, 36)
@@ -96,6 +97,7 @@ class Aplicativo:
         self.corpo_anterior = []
         self.probs = dict.fromkeys(TRADUCAO, 0.0)
         self.historico = deque(maxlen=36)
+        self.pausa = Pausa()
         self.acordos = 0
         self.placar = 0.0
         self.sons = Sons()
@@ -158,6 +160,7 @@ class Aplicativo:
         self.resultado = None
         self.corpo_anterior = list(self.jogo.corpo)
         self.historico.clear()
+        self.pausa.ativa = False
         self.probs = dict.fromkeys(TRADUCAO, 0.0)
         self.acordos = 0
         self.placar = 0
@@ -203,7 +206,7 @@ class Aplicativo:
                 self.sessao.interromper(exc)
 
     def atualizar(self, dt):
-        if self._fechado:
+        if self._fechado or self.pausa.ativa:
             return
         self._coletar()
         if self.registro:
@@ -427,6 +430,7 @@ class Aplicativo:
             # Quebrar mensagens de exceção para caberem na janela.
             for i in range(0, min(len(self.erro), 330), 110):
                 self.texto(self.erro[i:i + 110], 30, 740 + (i // 110) * 24, 19, VERMELHO)
+        self.pausa.desenhar(self)
         janela = self.tela.get_rect()
         escala = min(janela.width / 1280, janela.height / 860)
         tamanho = (max(1, int(1280 * escala)), max(1, int(860 * escala)))
@@ -460,6 +464,7 @@ class Aplicativo:
             if self.sessao and not self.sessao.concluida:
                 self.sessao.interromper()
             self.estado = "selecao"
+            self.pausa.ativa = False
             self.erro = ""
             if acao == "retry":
                 self.iniciar()
@@ -470,7 +475,9 @@ class Aplicativo:
         elif event.type == pygame.VIDEORESIZE and not self.cheia:
             self.tela = pygame.display.set_mode((max(1, event.w), max(1, event.h)), pygame.RESIZABLE)
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_F11:
+            if event.key in (pygame.K_p, pygame.K_SPACE) and not self.foco:
+                self.pausa.alternar(self.estado)
+            elif event.key == pygame.K_F11:
                 self.cheia = not self.cheia
                 self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
             elif event.key == pygame.K_TAB:
@@ -502,7 +509,7 @@ class Aplicativo:
                         break
 
     def resumo_terminal(self):
-        linhas = ["Resumo da sessão"]
+        linhas = ([self.erro] if self.erro else []) + ["Resumo da sessão"]
         total_laya = total_algoritmo = 0
         for i, resultado in enumerate(self.sessao.resultados if self.sessao else [], 1):
             geral = resultado["comparacao"]["geral"]
@@ -512,8 +519,6 @@ class Aplicativo:
             total_laya += laya
             total_algoritmo += algoritmo
         linhas.append(f"Totais: Laya: {total_laya} pontos · Algoritmo: {total_algoritmo} pontos")
-        if self.erro:
-            linhas.append(self.erro)
         return "\n".join(linhas)
 
     def executar(self, max_frames=None):
