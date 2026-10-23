@@ -1,8 +1,71 @@
 import time
 import pygame
+import pytest
 from jogos.snake.__main__ import argumentos
-from jogos.snake.gui import Aplicativo
+from jogos.snake.gui import Aplicativo, mouse_para_logico, tamanho_inicial_janela
 from test_sessao import MockLaya
+
+
+@pytest.mark.parametrize("desktop", [(1920, 1080), (1366, 768), (3840, 2160)])
+def test_tamanho_inicial_cabe_e_preserva_proporcao(desktop):
+    largura, altura = tamanho_inicial_janela(desktop)
+    assert 640 <= largura <= desktop[0] * .9
+    assert 430 <= altura <= (desktop[1] - 120) * .9
+    assert largura / altura == pytest.approx(1280 / 860, abs=.003)
+    if desktop == (3840, 2160):
+        assert largura > 1280 and altura > 860
+
+
+@pytest.mark.parametrize("desktop", [(640, 430), (500, 300), (320, 600)])
+def test_tamanho_inicial_desktop_pequeno(desktop):
+    largura, altura = tamanho_inicial_janela(desktop)
+    assert 0 < largura <= desktop[0]
+    assert 0 < altura <= desktop[1]
+    assert largura / altura == pytest.approx(1280 / 860, abs=.01)
+    if desktop == (640, 430):
+        assert (largura, altura) == (640, 430)
+
+
+@pytest.mark.parametrize("pos,destino,esperado", [
+    ((640, 430), (0, 0, 1280, 860), (640, 430)),
+    ((320, 215), (0, 0, 640, 430), (640, 430)),
+    ((740, 480), (100, 50, 1280, 860), (640, 430)),
+    ((100, 50), (100, 50, 640, 430), (0, 0)),
+    ((740, 480), (100, 50, 640, 430), (1280, 860)),
+    ((50, 25), (100, 50, 640, 430), (-100, -50)),
+])
+def test_mouse_para_logico(pos, destino, esperado):
+    assert mouse_para_logico(pos, destino) == pytest.approx(esperado)
+
+
+def test_janela_inicial_e_retorno_do_f11(tmp_path, monkeypatch):
+    monkeypatch.setattr(pygame.display, "get_desktop_sizes", lambda: [(1366, 768)])
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        inicial = tamanho_inicial_janela((1366, 768))
+        assert app.tela.get_size() == inicial
+        chamadas = []
+        def set_mode(tamanho, flags):
+            chamadas.append((tamanho, flags))
+            return app.tela
+        monkeypatch.setattr(pygame.display, "set_mode", set_mode)
+        for _ in range(2):
+            app.evento(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F11))
+        assert chamadas == [((0, 0), pygame.FULLSCREEN), (inicial, pygame.RESIZABLE)]
+        assert not app.cheia
+    finally:
+        app.fechar()
+
+
+def test_desktop_indisponivel_usa_fallback(tmp_path, monkeypatch):
+    def indisponivel():
+        raise pygame.error("desktop indisponível")
+    monkeypatch.setattr(pygame.display, "get_desktop_sizes", indisponivel)
+    app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
+    try:
+        assert app.tela.get_size() == tamanho_inicial_janela((1280, 860))
+    finally:
+        app.fechar()
 
 
 def test_cli_padroes():

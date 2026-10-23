@@ -2,6 +2,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import math
+import os
+import sys
 from time import perf_counter
 import pygame
 from nucleo.config import versoes
@@ -20,10 +22,46 @@ AZUL = (76, 155, 234)
 TRADUCAO = {"straight": "Reto", "left": "Esquerda", "right": "Direita"}
 
 
+def tamanho_inicial_janela(desktop: tuple[int, int]) -> tuple[int, int]:
+    """Preserva a proporção do canvas, com margem para título e barra de tarefas."""
+    largura, altura = desktop
+    escala = min(largura * .9 / 1280, max(1, altura - 120) * .9 / 860)
+    escala = min(max(.5, escala), largura / 1280, altura / 860)
+    return max(1, int(1280 * escala)), max(1, int(860 * escala))
+
+
+def mouse_para_logico(pos: tuple[int, int],
+                      destino: tuple[int, int, int, int]) -> tuple[float, float]:
+    """Converte coordenadas da janela usando a área onde o canvas foi desenhado."""
+    x, y = pos
+    esquerda, topo, largura, altura = destino
+    return (x - esquerda) * 1280 / largura, (y - topo) * 860 / altura
+
+
+def _ativar_dpi_awareness():
+    if sys.platform != "win32":
+        return
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 class Aplicativo:
     def __init__(self, args, decisor=None, pasta_runs=None):
+        _ativar_dpi_awareness()
+        os.environ["SDL_VIDEO_CENTERED"] = "1"
         pygame.init()
-        self.tela = pygame.display.set_mode((1280, 860), pygame.RESIZABLE)
+        try:
+            desktop = pygame.display.get_desktop_sizes()[0]
+        except (pygame.error, IndexError):
+            desktop = (1280, 860)
+        self.tamanho_inicial = tamanho_inicial_janela(desktop)
+        self.tela = pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
         pygame.display.set_caption("Laya Games · Snake v0.1")
         self.canvas = pygame.Surface((1280, 860))
         self.fontes = {}
@@ -434,7 +472,7 @@ class Aplicativo:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F11:
                 self.cheia = not self.cheia
-                self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode((1280, 860), pygame.RESIZABLE)
+                self.tela = pygame.display.set_mode((0, 0), pygame.FULLSCREEN) if self.cheia else pygame.display.set_mode(self.tamanho_inicial, pygame.RESIZABLE)
             elif event.key == pygame.K_TAB:
                 self.painel = not self.painel
             elif event.key == pygame.K_ESCAPE:
@@ -453,9 +491,8 @@ class Aplicativo:
                     valor += event.unicode
                 setattr(self, self.foco, valor)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            x, y = event.pos
             destino = getattr(self, "destino", self.tela.get_rect())
-            pos = ((x - destino.x) * 1280 / destino.width, (y - destino.y) * 860 / destino.height)
+            pos = mouse_para_logico(event.pos, tuple(destino))
             self.foco = next((nome for nome, r in self.campos.items() if r.collidepoint(pos)), None)
             if not self.foco:
                 for r, acao, ativo in self.botoes:
