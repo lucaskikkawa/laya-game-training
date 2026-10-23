@@ -36,10 +36,10 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    ```powershell
    $env:LAYA_HOME = 'C:\Users\lucas\laya-games'
    .\.venv\Scripts\Activate.ps1
-   python -m jogos.snake --partidas 1 --nivel 15 --versao v000 --modo normal
+   python -m jogos.snake --nivel 15 --versao v000 --modo normal
    ```
 
-   Na seleção, confira nível, versão e velocidade. Clique **Iniciar** para conectar
+   Sem `--partidas`, na seleção, confira nível, versão e velocidade. Clique **Iniciar** para conectar
    ao Laya. A primeira conexão pode demorar. O modo normal começa em 1 passo/s.
    O jogo mostra a run, as decisões e o resultado; Repetir cria uma nova sessão.
    Comandos completos sem ativar o venv, para uma partida normal no mapa 15×15:
@@ -55,7 +55,8 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    python -m jogos.snake --partidas 50 --nivel 20 --versao v000 --modo rapido --passos-por-segundo 5
    ```
 
-   Clique Iniciar na janela. A tela mostra progresso, tempo e resumo parcial,
+   Com `--partidas N`, a sessão inicia sem clique, avança automaticamente e encerra com um resumo de pontos no terminal.
+   A tela mostra progresso, tempo e resumo parcial,
    sem desenhar o tabuleiro. A velocidade pedida é um teto: a inferência pode
    limitar a velocidade real, que é medida nos JSONs. `--cpu` força CPU.
 

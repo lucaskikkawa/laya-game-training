@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "laya-game-training"
-version = "0.1.0"
+version = "0.1.1"
 description = "Snake e painel de decisões do Laya"
 requires-python = ">=3.13"
 dependencies = ["torch==2.14.1", "transformers==5.20.2", "laya==0.4.13", "pygame-ce==2.5.8", "numpy==2.5.4", "pytest==9.1.1"]

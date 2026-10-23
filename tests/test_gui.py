@@ -6,6 +6,9 @@ from test_sessao import MockLaya
 
 
 def test_cli_padroes():
+    assert argumentos([]).partidas == 1
+    assert not argumentos([]).auto_iniciar
+    assert argumentos(["--partidas", "1"]).auto_iniciar
     assert argumentos([]).passos_por_segundo == 1
     assert argumentos(["--modo", "rapido"]).passos_por_segundo == 5
     assert argumentos(["--cpu", "--partidas", "3"]).cpu
@@ -14,6 +17,72 @@ def test_cli_padroes():
 def test_gui_selecao_e_frames(tmp_path):
     app = Aplicativo(argumentos([]), MockLaya(), tmp_path)
     app.executar(max_frames=5)
+    assert app.estado == "selecao"
+    assert app.sessao is None
+
+
+def test_gui_auto_inicia_e_encerra_com_resumo(tmp_path, capsys, monkeypatch):
+    app = Aplicativo(argumentos(["--modo", "rapido", "--partidas", "2",
+                                "--passos-por-segundo", "1000"]), MockLaya(), tmp_path)
+    frames = []
+    atualizar = app.atualizar
+
+    def frame(dt):
+        frames.append(app.estado)
+        atualizar(dt)
+
+    monkeypatch.setattr(app, "atualizar", frame)
+    app.executar(max_frames=1200)
+    assert frames[0] == "carregando"
+    assert len(frames) < 1200
+    assert app.estado == "resultado" and app.sessao.concluida, app.erro
+    assert len(app.sessao.resultados) == 2
+    linhas = ["Resumo da sessão"]
+    totais = {"laya": 0, "algoritmo": 0}
+    for i, resultado in enumerate(app.sessao.resultados, 1):
+        geral = resultado["comparacao"]["geral"]
+        linhas.append(f"Partida {i}: Laya: {geral['laya']['pontos']} pontos · "
+                      f"Algoritmo: {geral['algoritmo']['pontos']} pontos")
+        for agente in totais:
+            totais[agente] += geral[agente]["pontos"]
+    linhas.append(f"Totais: Laya: {totais['laya']} pontos · Algoritmo: {totais['algoritmo']} pontos")
+    assert app.resumo_terminal() == "\n".join(linhas)
+    assert capsys.readouterr().out == app.resumo_terminal() + "\n"
+
+
+def test_gui_auto_avanca_no_modo_normal(tmp_path):
+    app = Aplicativo(argumentos(["--partidas", "2"]), MockLaya(), tmp_path)
+    try:
+        app.iniciar()
+        app.futuro.result(timeout=5)
+        app.futuro = None
+        app.sessao.indice = 1
+        app.estado = "resultado"
+        app.proximo_passo = time.perf_counter() + 2
+        app.atualizar(.016)
+        assert app.estado == "resultado"
+        app.proximo_passo = time.perf_counter() - .01
+        app.atualizar(.016)
+        assert app.estado == "jogando"
+    finally:
+        app.fechar()
+
+
+def test_gui_auto_erro_encerra_e_main_retorna_falha(tmp_path, monkeypatch, capsys):
+    from jogos.snake import __main__, gui
+
+    decisor = MockLaya()
+
+    def falhar():
+        raise RuntimeError("modelo indisponível")
+
+    decisor.carregar = falhar
+    app = Aplicativo(argumentos(["--partidas", "1"]), decisor, tmp_path)
+    monkeypatch.setattr(gui, "Aplicativo", lambda args: app)
+    monkeypatch.setattr(__main__, "argumentos", lambda: app.args)
+    assert __main__.main() != 0
+    assert app.estado == "erro" and not app.rodando
+    assert "modelo indisponível" in capsys.readouterr().out
 
 
 def test_gui_run_mockada_e_controles(tmp_path):
