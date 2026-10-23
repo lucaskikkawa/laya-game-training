@@ -1,5 +1,5 @@
 # Planejamento laya-game-training (Planejamento aprovado em 22/10/2026)
-Atualizado: 22/10/2026
+Atualizado: 22/10/2026 (Python 3.14 como padrão)
 
 ## Objetivo
 O Laya joga jogos em Pygame em tempo real e aprende de verdade, não por tentativa aleatória, com conhecimento que passa de um jogo pra outro.
@@ -17,9 +17,22 @@ Níveis, escolhidos por Lucas numa tela de seleção, sem subir de nível automa
 | 15x15 | 50 gomos | 60 passos |
 | 20x20 | 90 gomos | 80 passos |
 | 25x25 | 140 gomos | 100 passos |
-| 30x30 | 200 gomos | 120 passos |
+
+30x30 adiado para depois da v0.1. Configuração preservada em
+`NIVEIS_ADIADOS`: meta de 200 gomos e limite de 120 passos; não aparece no menu,
+na CLI nem no QA dos níveis jogáveis.
 
 Pontos: cada comida vale 100 menos 10 por passo além do caminho ideal, com mínimo de 10.
+O ideal continua sendo o BFS estático calculado quando a comida aparece; se não
+existir, registra `None` e não se cobra excesso mensurável.
+
+Regra da comida (decisão do Lucas, opção a): a próxima casa da lista salva só
+recebe comida se estiver vazia e alcançável da cabeça em até o limite sem comer
+do nível, considerando a liberação temporal do corpo atual: segmento de índice
+`i` (cabeça = 0) libera sua casa após `len(corpo) - i` passos. A busca considera
+casa e tempo, sem espera parada. Candidatas ocupadas ou inalcançáveis a tempo
+são puladas, sem sorteio adicional. O resultado depende apenas do estado e da
+lista salva; níveis e limites permanecem os da tabela.
 
 O estado é o mapa inteiro em caracteres (. H B T F), mais a direção e o vocabulário genérico.
 As jogadas são reto, esquerda e direita.
@@ -57,16 +70,53 @@ Telas de resultado:
 - Modo rápido: tela de resumo só no fim da sessão.
 
 ## Algoritmo (gabarito, não pode errar)
-- Caminho mais curto até a comida com o teste do rabo: depois de comer, ainda consegue chegar no rabo? Se não, segue o rabo.
-- O QA roda 1.000 partidas por nível e exige 100% de vitórias. Qualquer run perdida é descartada.
+- Híbrido na v0.1 (etapa 3): BFS principal com teste do rabo após crescer e
+  ciclo de segurança pré-calculado por nível. Entra em segurança se faltar
+  caminho seguro, a área livre alcançável for menor que a cobra ou o rabo
+  ficar inalcançável. O planejador BFS completo não exige ordem circular;
+  tamanho e desalinhamento não são gatilhos. Reavalia o BFS em cada passo de
+  segurança e preserva rotas temporais validadas mesmo com risco estático de
+  área/rabo, incluindo perto do limite sem comer.
+  O ciclo e os atalhos ordenados ficam como recursos do modo segurança.
+- 20x20: ciclo completo. 15x15 e 25x25: ciclo com uma casa omitida, `(n-1, 0)`,
+  com saída validada para comer nela e posterior reentrada; sem garantia
+  total. O limite sem comer permanece 100 no 25x25. Detalhes em
+  `docs/ALGORITMO.md`; a etapa não certifica novamente o QA completo.
+- Cada passo registra `modo` (`bfs`/`seguranca`) e `motivo_seguranca`; os
+  resumos das runs contam os passos em segurança por motivo.
+- O script de QA roda 200 partidas por nível por padrão e exige 100% de vitórias. Qualquer derrota reprova o QA e é registrada para reprodução.
+
+Resultados históricos anteriores ao híbrido e à correção única: 15x15 **200/200**,
+20x20 **200/200**, 25x25 **198/200**. O 25x25 ainda não satisfaz os 100%.
+Após a correção única, somente as falhas 62 e 128 foram repetidas com as
+mesmas listas: **2/2 vitórias**. Isso não certifica os 200 casos após a alteração.
+O QA completo não foi executado nesta rodada.
+O teste `slow` ampliado mantém 1.000 partidas por nível, quando solicitado.
 
 ## Arquivos de cada sessão
 - Run do Laya: `Laya_AAAA-MM-DD_HH-MM`, com o estado, as probabilidades, a escolha, a confiança e a jogada ideal em cada passo.
-- Run do algoritmo: um jogo à parte, com a mesma lista de comidas pré-sorteada. Se a casa da comida estiver ocupada, pula pra próxima.
+- Run do algoritmo: um jogo à parte, com a mesma lista de comidas pré-sorteada. Aplica a mesma regra de comida alcançável a tempo descrita acima.
+- Ambas as runs registram `pulos`: `{indice, posicao, motivo, passo}`, com motivo
+  `ocupada` ou `inalcancavel`, e `comidas_efetivas` (comidas que apareceram).
+  Índices dos arquivos são absolutos na lista da sessão, a partir de zero;
+  `passo` é o total de movimentos já executados (0 na abertura).
+  O Jogo mantém os mesmos registros com índices locais à sua lista.
+- A sessão registra `valida_para_treino=true` e `motivo=null` inicialmente.
+  Se qualquer run independente do algoritmo perder, toda a sessão recebe
+  `valida_para_treino=false`, `motivo="algoritmo_perdeu"`, inclusive runs anteriores
+  e posteriores. Uma vitória posterior não reabilita a sessão. A regra vale no
+  modo normal e também no rápido. O painel de resultado avisa a exclusão e a
+  comparação registra os campos. `treino/selecao.py` seleciona somente sessões
+  concluídas explicitamente válidas; sessões antigas sem a marcação também
+  ficam de fora. Nenhuma run de sessão inválida deve alimentar o treino.
 - Placar automático `Laya_Data_Hora`.
 
 Comparações, feitas pelo código, sem Gemini:
 - Geral: pontos, passos e morte das duas runs.
+- Pulos e comidas efetivas de cada run, com aviso e primeiro índice (base zero)
+  de divergência das sequências efetivas. Uma sequência que termina antes
+  diverge no primeiro elemento ausente. Os corpos podem diferir entre Laya e
+  algoritmo, portanto os pulos também podem diferir apesar da lista comum.
 - Passo a passo, estilo xadrez online.
 
 ## Ciclo
@@ -101,7 +151,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 ## Treino e ambiente
 - REGRA DE HARDWARE: o Pygame roda no processador e na GPU integrada (Intel UHD 630). O Laya, para jogar e treinar, roda na GTX 1650 pelo CUDA.
 - PC do Lucas: Dell G15, GTX 1650 4 GB, 32 GB de RAM, Windows 11.
-- Usar um venv com Python 3.13 e torch com CUDA 12.6.
+- Usar um venv com Python 3.14 (PC do Lucas: 3.14.5) e torch com CUDA 12.6.
 - Fine-tuning completo não cabe em 4 GB, então congelamos a maior parte do modelo.
 - Teste de CPU contra GPU.
 - Kaggle: também vamos testar o treino lá. São 2 T4, 29 GB de RAM, sessões de até 12 h e 30 h de GPU por semana. Precisa verificar o telefone, o que é quase certo, mas não achei a regra oficial.
@@ -123,7 +173,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 
 ## Roadmap
 - v0.1, primeiro passo: Preparação do PC do Lucas: o Boss (único bot com acesso ao PC, sempre com aprovação do Lucas) cria a pasta C:\Users\lucas\laya-games\, faz o clone do repo, cria o venv, instala torch 2.14.1+cu126 (index cu126), transformers 5.20.2, pygame-ce, numpy, atualiza o laya pra 0.4.13, baixa o modelo convaiinnovations/laya (~1 GB) e confirma que o CUDA enxerga a GTX 1650.
-- v0.1: jogo, painel, níveis, algoritmo (QA 1.000 partidas/nível, 100%) e runs. O Laya começa sem treino (v000). Medir GPU e passos/s.
+- v0.1: jogo, painel, níveis, algoritmo híbrido com BFS e ciclo de segurança (QA padrão de 200 partidas/nível, 100%) e runs. O Laya começa sem treino (v000). Medir GPU e passos/s.
 - v0.2: treino no PC, calibração (runs de calibração + temperatura), modo comparação e teste de treino no Kaggle.
 - v0.3: tutor via `agy` (relatórios + arquivo de pesos); comparar 3.5 Flash Lite com 3.8 Flash.
 - v0.4: fluxo Kaggle completo.
@@ -141,7 +191,7 @@ Limite de cerca de 30 minutos por treino no PC. Se passar, diminuímos os exempl
 - laya 0.4.13. O PC do Lucas tem a 0.3.28 e vai atualizar no venv. Repositório: NandhaKishorM/laya, modelos em huggingface.co/convaiinnovations.
 - Checkpoint `convaiinnovations/laya`: 421M parâmetros, ModernBERT-large, 512 tokens.
 - Alternativa `laya-multilingual`: 322M parâmetros, 1024 tokens, até 8192.
-- torch 2.14.1+cu126, transformers 5.20.2 (fixar), pygame-ce 2.5.8, numpy 2.5.4. Todos rodam no Windows com Python 3.13.
+- torch 2.14.1+cu126, transformers 5.20.2 (fixar), pygame-ce 2.5.8, numpy 2.5.4. Todos rodam no Windows com Python 3.14 (torch tem wheel cp314 win_amd64 no índice cu126).
 - Placa de vídeo, por estimativa: dois Laya em fp16 no mesmo programa ocupam uns 2,0 a 2,4 GB e cabem na GTX 1650. A medição de verdade fica pra v0.1.
 - Treino no PC: só congelando a maior parte do modelo (LoRA ou só a parte final). O treino completo precisa de mais de 6,7 GB.
 

@@ -17,3 +17,15 @@ checkpoints/
 *.onnx
 *.jsonl
 *.parquet
+modelos/
+.laya_ref/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+*.log
+logs/
+*.gz
+.env.*
+*.pem
+*.p12
