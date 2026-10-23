@@ -41,8 +41,15 @@ pois uma passagem posterior pode encontrar um segmento já liberado.
 
 Uma candidata ocupada é pulada com motivo `ocupada`; uma candidata vazia sem
 alcance dentro do prazo é pulada com `inalcancavel`. Não há aleatoriedade nessa
-seleção: estado e lista iguais produzem comida e pulos iguais. Esgotar a lista
-continua sendo erro de sessão, sem sortear outra comida.
+seleção: estado e lista iguais produzem comida e pulos iguais.
+
+Antes de consultar a lista a cada nova comida, verifica-se uma vez se alguma
+casa atualmente livre é alcançável no prazo. Se nenhuma for, a partida encerra
+imediatamente com `sem_comida_valida`, inclusive logo após comer. Não avança o
+índice nem acrescenta pulos ou comidas efetivas; a auditoria anterior permanece.
+Essa verificação usa o mesmo alcance temporal do filtro, não o BFS estático.
+Se houver casa válida, mas a lista acabar sem fornecê-la, o término continua
+sendo `lista_esgotada`, sem sortear outra comida.
 
 `Jogo.pulos` guarda `{indice, posicao, motivo, passo}`; `passo` conta movimentos
 já executados, incluindo 0 na abertura. `comidas_efetivas` guarda índice, posição

@@ -163,6 +163,7 @@ class Jogo:
         self.comida = None
         ocupadas = set(self.corpo)
         alcancaveis = alcancaveis_no_prazo(self.corpo, self.nivel.tamanho, self.nivel.limite)
+        # Verificar o estado uma vez, antes de consumir índices da lista salva.
         if not alcancaveis - ocupadas:
             self.fim = True
             self.morte = "sem_comida_valida"

@@ -58,6 +58,11 @@ posição e passo de nascimento. A alcançabilidade que decide o nascimento é
 **temporal**, com liberação do corpo e limite original; difere da área estática.
 Se nenhuma casa atualmente livre é alcançável no prazo, a partida termina com
 `sem_comida_valida` antes de consultar candidatas, sem fabricar milhares de pulos.
+Isso também vale ao posicionar a próxima comida após um movimento que comeu:
+o índice da lista e a auditoria anterior são preservados, sem novos `pulos` ou
+`comidas_efetivas`. Ambas as runs registram `motivo_termino="sem_comida_valida"`
+e `resumo.morte="sem_comida_valida"`; no snapshot final, `comida` e
+`indice_comida` são `null`, e o passo inclui o movimento que acabou de comer.
 Se existem casas válidas, mas acabam as candidatas, termina com `lista_esgotada`.
 
 `motivo_termino` é `vitoria`, `corpo`, `parede`, `fome`, `lista_esgotada`,

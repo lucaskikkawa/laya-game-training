@@ -195,7 +195,7 @@ def test_pulos_nao_esgotam_lista_com_casa_alcancavel(alvo, rota, monkeypatch):
         (0, "ocupada"), (1, "inalcancavel")]
 
 
-def test_sem_saida_antes_do_limite_registra_inalcancavel_sem_ressortear():
+def test_sem_saida_antes_do_limite_termina_sem_consultar_candidatas():
     g = jogo()
     g.corpo = [(x, y) for y in range(8)
                for x in (range(15) if y % 2 == 0 else range(14, -1, -1))]
@@ -245,3 +245,28 @@ def test_sem_comida_valida_nao_consulta_milhares_de_itens():
     g.indice_comida = 0
     g._nova_comida()
     assert g.morte == 'sem_comida_valida' and g.indice_comida == 0
+
+
+@pytest.mark.parametrize("quantidade", [0, 20000])
+def test_sem_comida_valida_apos_comer_preserva_indice_e_auditoria(
+        preparar_comida_sem_saida, quantidade):
+    class ListaAuditada(list):
+        def __getitem__(self, indice):
+            pytest.fail("Nenhuma candidata deve ser consultada após comer sem saída")
+
+    g = preparar_comida_sem_saida([(1, 0), (0, 0)] + [(24, 24)] * quantidade)
+    indice = g.indice_comida
+    pulos = list(g.pulos)
+    efetivas = list(g.comidas_efetivas)
+    assert indice == 2 and len(pulos) == len(efetivas) == 1
+    g.comidas = ListaAuditada(g.comidas)
+
+    assert g.passo("straight") == 100
+
+    assert g.fim and not g.vitoria and g.morte == "sem_comida_valida"
+    assert len(g.corpo) < g.nivel.meta and g.nivel == NIVEIS[25]
+    assert g.comida is None and g.indice_comida == indice
+    assert g.pulos == pulos and g.comidas_efetivas == efetivas
+    assert g.passos == g.comidas_consumidas == 1 and g.sem_comer == 0
+    with pytest.raises(RuntimeError, match="já terminou"):
+        g.passo("straight")

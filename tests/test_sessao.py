@@ -409,6 +409,38 @@ def test_terminos_reais_persistidos_nas_duas_runs(tmp_path, monkeypatch):
                 assert run['snapshot_final']['indice_comida'] is None
 
 
+def test_sem_comida_valida_apos_comer_persistido_nas_duas_runs(
+        tmp_path, monkeypatch, preparar_comida_sem_saida):
+    from jogos.snake import sessao
+
+    monkeypatch.setattr(sessao, "Jogo", lambda nivel, comidas: preparar_comida_sem_saida(comidas))
+    monkeypatch.setattr(sessao.Algoritmo, "escolher", lambda self, jogo: "straight")
+    inicio = 7
+    comidas = [(24, 24)] * inicio + [(1, 0), (0, 0)] + [(24, 24)] * 20000
+    s = Sessao(MockLaya(), nivel=25, pasta=tmp_path, comidas=comidas)
+    s.cursor = inicio
+    executar(s)
+
+    for agente in ("laya", "algoritmo"):
+        run = ler_run(s.pasta, f"run_0001_{agente}.json")
+        assert run["motivo_termino"] == run["resumo"]["morte"] == "sem_comida_valida"
+        assert run["status"] == "concluida" and not run["resumo"]["vitoria"]
+        assert run["resumo"]["passos"] == run["snapshot_final"]["passo"] == 1
+        assert run["resumo"]["comidas"] == 1 and run["resumo"]["pontos"] == 100
+        assert run["snapshot_final"]["comida"] is None
+        assert run["snapshot_final"]["indice_comida"] is None
+        assert run["snapshot_final"]["cabeca"] == [0, 0]
+        assert run["pulos"] == [{"indice": inicio, "posicao": [1, 0],
+                                 "motivo": "ocupada", "passo": 0, "area_alcancavel": 47}]
+        assert run["comidas_efetivas"] == [
+            {"indice": inicio + 1, "posicao": [0, 0], "passo": 0}]
+        assert len(run["passos"]) == 1
+        assert run["passos"][0]["indice_comida"] == inicio + 1
+        assert run["passos"][0]["pontos_ganhos"] == 100
+    assert s.cursor == inicio + 2
+    assert not s.documento["valida_para_treino"]
+
+
 def test_bfs_nulo_e_escape_pelo_rabo_persistidos(tmp_path, monkeypatch):
     from jogos.snake import sessao
     from jogos.snake.regras import Jogo
