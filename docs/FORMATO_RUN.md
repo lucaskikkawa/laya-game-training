@@ -10,6 +10,10 @@ HEAD, ou null se indisponível), `nivel`, `versao_laya` (checkpoint escolhido),
 `versao_pacote_laya` (ou null) e `arquivo_comidas` (relativo à pasta da sessão).
 O hash identifica o HEAD; alterações locais sem commit não mudam esse hash.
 O campo `passos` de cada JSON aponta para seu arquivo `.jsonl.gz`.
+`inicio_lista` indica o deslocamento inicial da run em `comidas.json`; todos os
+índices persistidos (movimentos, snapshot, pulos e comidas efetivas) já incluem
+esse deslocamento. Uma run terminada na abertura tem gzip válido sem linhas,
+snapshot com `passo=0` e a auditoria das candidatas consultadas.
 
 ## Cada linha de movimento
 
@@ -34,10 +38,16 @@ Assim, a primeira linha tem `passo=1` e corpo inicial. O corpo completo, nível,
 direção e comida permitem reconstruir o tabuleiro sem texto duplicado por linha.
 O estado em texto ainda é entregue à GUI/modelo durante o jogo.
 
-Somente o Laya registra `probabilidades` por ação relativa, `confianca`,
+Somente o Laya registra `probabilidades` por direção relativa (`straight`,
+`left`, `right`, em relação à `direcao` anterior ao movimento), `confianca`,
 `jogada_ideal` do algoritmo no mesmo estado, `concorda` e `estrategia_ideal`.
 A partida independente do algoritmo pode ter corpo, comidas efetivas e duração
-diferentes, apesar de começar com a mesma lista.
+diferentes, apesar de começar com a mesma lista. `estrategia`/`motivo` do Laya
+identificam a decisão do modelo, sem atribuir a ele uma explicação que não
+forneceu; `estrategia_ideal` descreve a estratégia do oráculo naquele estado.
+Na run independente, `estrategia` e `motivo` recebem a estratégia informada pelo
+algoritmo, sem alterar suas decisões. Colisões também contam como movimento e
+possuem uma linha; a cabeça no registro é a posição anterior à tentativa.
 
 ## Auditoria e término
 
@@ -56,7 +66,16 @@ comida/índice, fome, prazo, total de passos e tabuleiro em texto. `resumo` incl
 pontos, passos, gomos, vitória, morte e comidas consumidas. O campo legado
 `resumo.morte` conserva `limite_sem_comer`, normalizado para `fome` no término.
 Interrupções produzem `laya_parcial.json` e fecham o gzip, inclusive sem movimentos;
-exceções da partida independente produzem JSON do algoritmo com término `erro`.
+exceções de decisão (Laya ou oráculo local) fecham e salvam a run parcial na
+própria sessão, mesmo sem GUI. O campo `erro` da run parcial contém tipo e
+mensagem da exceção, ou `null` para interrupção voluntária; o término desta
+última também é `erro`, pois não foi um fim natural da partida.
+Exceções da partida independente fecham o gzip e produzem JSON do algoritmo
+com término/status `erro`, detalhes em `erro`, snapshot e resumo do último estado.
+As linhas já concluídas continuam legíveis; uma decisão que falhou antes do
+movimento não gera linha. A run concluída do Laya é preservada e não recebe
+uma cópia parcial por falha posterior do algoritmo. Em colisões, o snapshot
+mantém a última posição válida do corpo e a direção da tentativa fatal.
 
 A comparação aponta os dois gzip em `passo_a_passo`; alinhe pelo campo `passo`,
 permitindo linhas ausentes quando uma run termina antes. Guarda concordância,

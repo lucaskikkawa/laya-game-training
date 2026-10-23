@@ -148,8 +148,15 @@ class Sessao:
         return self.jogo
 
     def passo(self):
-        if self.jogo is None or self.jogo.fim:
+        if not self._run_ativa or self.jogo is None or self.jogo.fim:
             raise RuntimeError("Inicie uma run antes de jogar")
+        try:
+            return self._passo()
+        except Exception as exc:
+            self.interromper(exc)
+            raise
+
+    def _passo(self):
         jogo = self.jogo
         estado = jogo.estado()
         ideal = self._oraculo.escolher(jogo)
@@ -202,13 +209,16 @@ class Sessao:
         self._fechar_passos_laya()
         laya = self._dados_laya()
         salvar_json(self.pasta / f"{identificador}_laya.json", laya)
+        # O Laya já terminou: uma falha do gabarito não deve reclassificá-lo
+        # como interrompido nem criar uma segunda versão parcial desta run.
+        self._run_ativa = False
         # Run independente: mesmas regras, mesma posição inicial e mesmo início da lista.
         gabarito = Jogo(self.nivel, self.comidas[self.cursor:])
-        algoritmo = Algoritmo()
         inicio = perf_counter()
         nome_passos_algoritmo = f"{identificador}_algoritmo.jsonl.gz"
         try:
             with gzip.open(self.pasta / nome_passos_algoritmo, "wt", encoding="utf-8", compresslevel=1) as arquivo:
+                algoritmo = Algoritmo()
                 while not gabarito.fim:
                     inicio_passo = perf_counter()
                     acao = algoritmo.escolher(gabarito)
@@ -219,14 +229,16 @@ class Sessao:
                     registro["pontos_ganhos"] = gabarito.passo(acao)
                     registro["pontos"] = gabarito.pontos
                     escrever_passo(arquivo, registro)
-        except Exception:
+        except Exception as exc:
+            self.documento["erro"] = f"{type(exc).__name__}: {exc}"
             self.documento["valida_para_treino"] = False
             self.documento["motivo"] = "algoritmo_perdeu"
             self.documento["status"] = "erro"
             self._salvar()
             salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
                 **self._fim_run(gabarito, "erro"), **self._auditoria_comidas(gabarito),
-                "status": "erro", "inicio_lista": self.cursor, "passos": nome_passos_algoritmo})
+                "status": "erro", "erro": self.documento["erro"],
+                "inicio_lista": self.cursor, "passos": nome_passos_algoritmo})
             raise
         tempo = perf_counter() - inicio
         # A invalidação é da sessão inteira e persiste nas próximas runs.
@@ -273,7 +285,8 @@ class Sessao:
             return
         if self._run_ativa and self.jogo is not None:
             self._fechar_passos_laya()
-            salvar_json(self.pasta / f"run_{self.indice + 1:04d}_laya_parcial.json", self._dados_laya("interrompida"))
+            salvar_json(self.pasta / f"run_{self.indice + 1:04d}_laya_parcial.json", {**self._dados_laya("interrompida"),
+                "erro": f"{type(erro).__name__}: {erro}" if erro is not None else None})
         self._run_ativa = False
         # Fechar a janela depois de um erro não deve apagar a causa original.
         if erro is not None or self.documento["status"] != "erro":
