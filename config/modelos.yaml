@@ -1,0 +1,20 @@
+# Tabela 3B (23/10/2026). tipo: [dono, backup1, backup2...]. Formato: provedor:modelo[:esforco]
+# Cadeia geral se a lista acabar: para e avisa o Boss.
+limites: {aviso: 50, para: 80}
+tarefas:
+  logica:        [codex:gpt-6.1-sol:medium, agy:gemini-4-argon-medium, agy:claude-opus-5-5-medium]
+  treino-gpu:    [codex:gpt-6.1-sol:medium, agy:gemini-4-argon-high, agy:claude-opus-5-5-medium]
+  instalador:    [codex:gpt-6.1-sol:medium, agy:gemini-4-argon-medium, agy:claude-sonnet-5-5-high]
+  bug-dificil:   [agy:gemini-4-argon-high, agy:claude-opus-5-5-high, codex:gpt-6.1-sol:medium]
+  revisao-final: [codex:gpt-6.1-sol:medium, agy:gemini-4-argon-high]
+  ui:            [agy:claude-sonnet-5-5-high, agy:gemini-4-argon-medium, codex:gpt-6.1-sol:medium]
+  pequena:       [agy:gemini-3.8-flash-high, agy:claude-sonnet-5-5-medium]
+  teste:         [agy:gemini-3.8-flash-medium, agy:claude-sonnet-5-5-medium]
+  bug-simples:   [agy:gemini-3.8-flash-medium, agy:claude-sonnet-5-5-medium]
+  revisao:       [agy:gemini-3.8-flash-medium, agy:claude-sonnet-5-5-medium]
+  checklist:     [agy:gemini-3.8-flash-low, agy:claude-sonnet-5-5-low]
+  rodar-testes:  [agy:gemini-3.8-flash-low, agy:claude-sonnet-5-5-low]
+  logs:          [agy:gemini-3.8-flash-medium, agy:claude-sonnet-5-5-medium]
+  texto:         [agy:gemini-3.8-flash-low, agy:claude-sonnet-5-5-medium]
+  docs:          [agy:gemini-3.8-flash-low, agy:claude-sonnet-5-5-low]
+  relatorio:     [agy:gemini-3.8-flash-low, agy:claude-sonnet-5-5-low]

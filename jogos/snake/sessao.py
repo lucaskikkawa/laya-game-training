@@ -136,6 +136,7 @@ class Sessao:
         salvar_json(self.pasta / f"{self.documento['placar']}.json", {
             "nome": self.documento["placar"], "nivel": self.nivel, "versao": self.versao,
             "runs": [{"run": r["run"], **r["comparacao"]["geral"]["laya"],
+                      "pontos_algoritmo": r["comparacao"]["geral"]["algoritmo"]["pontos"],
                       "concordancia": r["comparacao"]["concordancia"]} for r in self.resultados]})
 
     @property
@@ -187,7 +188,7 @@ class Sessao:
         escrever_passo(self._arquivo_laya, registro)
         if registro["motivo_seguranca"] is not None:
             self._seguranca_laya[registro["motivo_seguranca"]] += 1
-        self.registros.append({k: registro[k] for k in ("escolha", "jogada_ideal", "latencia_ms")})
+        self.registros.append({k: registro[k] for k in ("escolha", "jogada_ideal", "latencia_ms", "confianca")})
         return registro
 
     def _registro(self, jogo):
@@ -217,9 +218,10 @@ class Sessao:
         return {**self._auditoria_comidas(self.jogo), "status": status, "inicio_lista": self.cursor, "passos": self._nome_passos_laya,
                 **self._fim_run(self.jogo, "erro" if status == "interrompida" else None), "segundos": segundos,
                 "passos_por_segundo": self.jogo.passos / segundos if segundos else 0,
+                "historico_confianca": [r["confianca"] for r in self.registros],
                 "latencia_media_ms": sum(r["latencia_ms"] for r in self.registros) / max(1, len(self.registros))}
 
-    def finalizar_run(self):
+    def finalizar_run(self, observar=None):
         if not self._run_ativa or self.jogo is None or not self.jogo.fim:
             raise RuntimeError("Não há run terminada para finalizar")
         identificador = f"run_{self.indice + 1:04d}"
@@ -238,6 +240,8 @@ class Sessao:
             with gzip.open(self.pasta / nome_passos_algoritmo, "wt", encoding="utf-8", compresslevel=1) as arquivo:
                 algoritmo = Algoritmo()
                 while not gabarito.fim:
+                    if observar is not None:
+                        observar(gabarito)
                     inicio_passo = perf_counter()
                     acao = algoritmo.escolher(gabarito)
                     latencia = (perf_counter() - inicio_passo) * 1000
@@ -253,12 +257,12 @@ class Sessao:
         except Exception as exc:
             self.documento["erro"] = f"{type(exc).__name__}: {exc}"
             self.documento["valida_para_treino"] = False
-            self.documento["motivo"] = "algoritmo_perdeu"
-            self.documento["status"] = "erro"
+            self.documento["motivo"] = "interrompida" if isinstance(exc, CancelledError) else "algoritmo_perdeu"
+            self.documento["status"] = "interrompida" if isinstance(exc, CancelledError) else "erro"
             self._salvar()
             salvar_json(self.pasta / f"{identificador}_algoritmo.json", {
-                **self._fim_run(gabarito, "erro", seguranca), **self._auditoria_comidas(gabarito),
-                "status": "erro", "erro": self.documento["erro"],
+                **self._fim_run(gabarito, self.documento["status"], seguranca), **self._auditoria_comidas(gabarito),
+                "status": self.documento["status"], "erro": self.documento["erro"],
                 "inicio_lista": self.cursor, "passos": nome_passos_algoritmo})
             raise
         tempo = perf_counter() - inicio

@@ -1,11 +1,13 @@
-# Laya Games · Snake v0.1
+# Laya Games · Snake v0.1.2
 
 Snake com uma janela Pygame e painel das decisões do **Laya v000**, modelo base
 `convaiinnovations/laya`, sem treino. Interface em português; estado e efeitos
 das ações enviados ao modelo em inglês.
 
-**Implementação em validação: o gabarito ainda perde por fome nos níveis maiores.
-A v0.1 não está concluída.** Veja [estado do algoritmo e QA](docs/ALGORITMO.md).
+**Status:** v0.1.2 pronta para instalação e validação no Windows (QA e Revisor
+aprovados na branch `feature/v0.1.2`). Detalhes do algoritmo e do QA histórico
+em [docs/ALGORITMO.md](docs/ALGORITMO.md). Spec da sprint:
+[docs/SPEC_v0.1.2.md](docs/SPEC_v0.1.2.md).
 
 Leia [Instalação no Windows/PowerShell](docs/INSTALACAO.md).
 O [planejamento aprovado](docs/PLANEJAMENTO.md) é a fonte da verdade do projeto.
@@ -19,6 +21,22 @@ Na janela, selecione o nível e a versão e clique **Start**. O modelo é carreg
 somente nesse momento. F11 alterna tela cheia e Tab esconde o painel. Há caixa
 de velocidade, botões −1/+1, Retry e partidas automáticas. O modo rápido mostra
 progresso e resumo, sem desenhar o tabuleiro.
+
+### Modo rápido sem janela
+
+Para rodar sem abrir o Pygame (painel ao vivo no terminal):
+
+```powershell
+.\.venv\Scripts\python.exe -m jogos.snake --partidas N --modo rapido --sem-janela
+```
+
+`--sem-janela` exige `--partidas N` positivo e `--modo rapido`. Os dados da
+sessão são gravados como no modo com janela. **Ctrl+C** interrompe com segurança
+e preserva o que já foi salvo.
+
+Atalho opcional: `scripts/Laya Games - Modo rápido.bat` (duplo clique; pergunta
+quantas partidas). O `instalar.ps1` oferece criar o atalho na Área de Trabalho;
+o padrão é **não** criar.
 
 | Mapa | Vitória (gomos, incluindo cabeça) | Passos sem comer |
 |---|---:|---:|
@@ -40,7 +58,7 @@ passo permitido evita a fome. Não há mudança automática de nível.
 - `jogos/snake/`: regras puras, algoritmo, sessão, GUI e sons sintetizados.
 - `treino/`, `tutor/`: somente placeholders para versões futuras.
 - `tests/`: pytest, mocks sem torch/Laya e GUI headless.
-- `scripts/`: instalação Windows e QA do algoritmo.
+- `scripts/`: instalação Windows, atalho `.bat` do modo rápido e QA do algoritmo.
 - `modelos/`, `runs/`: dados locais ignorados pelo Git.
 
 `LAYA_HOME` configura a raiz de dados. O padrão é o diretório atual; o instalador
@@ -52,7 +70,7 @@ O adaptador chama `laya.load(...).system_one(...)`, com **uma pergunta choice e
 três efeitos** (reto/esquerda/direita). CUDA usa autocast fp16; CPU é o fallback.
 Carregamento e inferência ficam fora da thread gráfica. A tela mostra dispositivo,
 VRAM quando há CUDA, latência, confiança, concordância, histórico e mapa recebido.
-Não há tutor, treino, calibração ou modo de comparação visual na v0.1.
+Não há tutor, treino, calibração ou modo de comparação visual na v0.1.2.
 
 ## Runs e auditoria
 

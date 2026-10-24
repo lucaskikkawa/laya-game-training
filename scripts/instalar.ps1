@@ -96,6 +96,17 @@ else:
 '@
     Executar-Python $Verificar
     [Environment]::SetEnvironmentVariable('LAYA_HOME', $Destino, 'User')
+    $CriarAtalho = Read-Host 'Criar atalho do modo rápido na Área de Trabalho? [s/N]'
+    if ($CriarAtalho -match '^(s|sim)$') {
+        $AreaTrabalho = [Environment]::GetFolderPath('Desktop')
+        $ShellAtalho = New-Object -ComObject WScript.Shell
+        $Atalho = $ShellAtalho.CreateShortcut((Join-Path $AreaTrabalho 'Laya Games - Modo rápido.lnk'))
+        $Atalho.TargetPath = Join-Path $Destino 'scripts\Laya Games - Modo rápido.bat'
+        $Atalho.WorkingDirectory = $Destino
+        $Atalho.Description = 'Jogar partidas rápidas do Laya sem janela'
+        $Atalho.Save()
+        Write-Host 'Atalho criado na Área de Trabalho.'
+    }
     Write-Host "Instalação concluída em $Destino" -ForegroundColor Green
     Write-Host "LAYA_HOME=$Destino (salvo para novas janelas do PowerShell)."
     Write-Host "Para iniciar: & '$Exe' -m jogos.snake --partidas 1 --nivel 15 --versao v000 --modo normal"

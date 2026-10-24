@@ -29,6 +29,8 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    Não execute como administrador. Se uma versão fixada não estiver disponível,
    a instalação para com erro; o script não troca versões silenciosamente.
    Pode executá-lo novamente: reutiliza o venv, as versões instaladas e o snapshot local.
+   No fim, oferece criar **Laya Games - Modo rápido** na Área de Trabalho.
+   O padrão é **não**: pressione Enter para recusar; somente `s` ou `sim` cria o atalho.
 
 3. O instalador define `LAYA_HOME` como a raiz que contém `modelos/` e `runs/`.
    Abra um novo PowerShell ou defina a variável na janela atual:
@@ -60,6 +62,28 @@ e o driver NVIDIA instalados. Reserve espaço para o ambiente e o modelo (~1 GB)
    sem desenhar o tabuleiro. A velocidade pedida é um teto: a inferência pode
    limitar a velocidade real, que é medida nos JSONs. `--cpu` força CPU.
 
+5. Para jogar sem abrir janela/Pygame:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m jogos.snake --partidas 50 --modo rapido --sem-janela
+   ```
+
+   `--sem-janela` exige `--partidas N` positivo e `--modo rapido`; outra combinação
+   retorna erro. Sem esse argumento, a execução com janela continua disponível.
+   O painel atualiza no lugar cerca de quatro vezes por segundo no Windows Terminal
+   e no PowerShell, com progresso, tempos, hardware, decisões e pontuação pareada.
+   Durante a partida do Laya, os pontos do algoritmo aguardam a apuração independente;
+   durante a apuração, mostram o valor corrente. Os acumulados incluem pares concluídos.
+   Ao redirecionar a saída para arquivo, somente o resumo final é impresso.
+   O resumo em tabela informa a pasta dos dados. **Ctrl+C** interrompe com segurança,
+   preserva partidas concluídas e arquivos da partida em andamento (código de saída 130).
+   A velocidade padrão é 5 passos/s; use `--passos-por-segundo` para ajustar o teto.
+
+   Também pode abrir `scripts/Laya Games - Modo rápido.bat` com duplo clique,
+   ou usar o atalho opcional da Área de Trabalho. Ele pergunta quantas partidas,
+   utiliza o Python da `.venv` da instalação e mantém o resumo visível no final.
+   Não é preciso ativar o ambiente virtual.
+
 ## Intel UHD e NVIDIA
 
 Em **Configurações > Sistema > Tela > Elementos gráficos**, adicione
@@ -85,6 +109,8 @@ ambiente por cima do Python global.
   aparecem na seleção. Só v000 é fornecida; não há treino na v0.1.
 - `runs/Laya_AAAA-MM-DD_HH-MM[_NN]`: metadados, lista de comidas e runs JSON.
   Com `LAYA_HOME`, ambas as pastas ficam nessa raiz; sem ela, no diretório atual.
+- P ou espaço: pausa/retoma a partida, com **PAUSADO** sobre o jogo. Uma decisão
+  já enviada termina e é exibida ao retomar; nenhum novo passo é enviado na pausa.
 - F11: tela cheia; Tab: painel; Esc: voltar quando não houver tarefa em execução.
 - Caixa de passos/s e botões −1/+1: velocidade; automático: próxima partida
   sem intervenção. No modo normal o resultado aparece entre as runs.
